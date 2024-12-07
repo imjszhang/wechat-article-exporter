@@ -22,14 +22,6 @@
     </p>
     <p v-else-if="noMoreData" class="text-center mt-2 py-2 text-slate-400">已全部加载完毕</p>
     <span class="fixed right-[15px] bottom-0 z-50 font-mono bg-zinc-700 text-sm text-white p-2 rounded" v-if="totalPages > 0">加载进度: {{loadedPages}}/{{totalPages}}</span>
-    <div class="flex space-x-2 mt-4">
-      <button @click="loadAllArticles" class="h-10 px-6 font-semibold rounded-md border border-slate-200 text-slate-900 hover:border-slate-400">
-        加载全部文章
-      </button>
-      <button @click="exportData" class="h-10 px-6 font-semibold rounded-md border border-slate-200 text-slate-900 hover:border-slate-400">
-        数据导出
-      </button>
-    </div>
   </div>
 </template>
 
@@ -137,7 +129,7 @@ const bottomElementIsVisible = ref(false)
 function onElementVisibility(visible: boolean) {
   bottomElementIsVisible.value = visible
   if (visible && !noMoreData.value) {
-    loadData()
+    loadAllArticles()
   }
 }
 </script>
