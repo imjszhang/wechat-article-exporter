@@ -14,7 +14,6 @@
           :updatedAt="article.update_time"
           :is-original="article.copyright_stat === 1 && article.copyright_type === 1"
           :album-infos="article.appmsg_album_infos"
-          :item-show-type="article.item_show_type"
       />
     </ul>
     <div v-element-visibility="onElementVisibility"></div>
@@ -22,8 +21,15 @@
       <Loader :size="28" class="animate-spin text-slate-500"/>
     </p>
     <p v-else-if="noMoreData" class="text-center mt-2 py-2 text-slate-400">已全部加载完毕</p>
-
     <span class="fixed right-[15px] bottom-0 z-50 font-mono bg-zinc-700 text-sm text-white p-2 rounded" v-if="totalPages > 0">加载进度: {{loadedPages}}/{{totalPages}}</span>
+    <div class="flex space-x-2 mt-4">
+      <button @click="loadAllArticles" class="h-10 px-6 font-semibold rounded-md border border-slate-200 text-slate-900 hover:border-slate-400">
+        加载全部文章
+      </button>
+      <button @click="exportData" class="h-10 px-6 font-semibold rounded-md border border-slate-200 text-slate-900 hover:border-slate-400">
+        数据导出
+      </button>
+    </div>
   </div>
 </template>
 
@@ -57,7 +63,6 @@ const loadedPages = computed(() => Math.ceil(begin.value / ARTICLE_LIST_PAGE_SIZ
 const loginAccount = useLoginAccount()
 const activeAccount = useActiveAccount()
 
-
 defineExpose({
   init,
 })
@@ -74,10 +79,7 @@ async function loadData() {
     noMoreData.value = completed
     const count = articles.filter(article => article.itemidx === 1).length
     begin.value += count
-
     totalPages.value = Math.ceil(totalCount / ARTICLE_LIST_PAGE_SIZE)
-
-
     // 加载可用的缓存
     const lastArticle = articles.at(-1)
     if (lastArticle && !keyword.value) {
@@ -97,33 +99,21 @@ async function loadData() {
   }
 }
 
-/**
- * 从缓存加载当前公众号的历史文章
- */
 async function loadArticlesFromCache(fakeid: string, create_time: number) {
   const articles = await getArticleCache(fakeid, create_time)
-
   articleList.push(...articles)
-
-  // 更新 begin 参数
   const count = articles.filter(article => article.itemidx === 1).length
   begin.value += count
-
   const cachedInfo = await getInfoCache(fakeid)
   if (cachedInfo && cachedInfo.completed) {
     noMoreData.value = true
   }
-
   toast.add({
     title: `成功从缓存中加载了${articles.length}条数据`,
     timeout: 5000,
   })
 }
 
-
-/**
- * 初始化
- */
 function init(query: string) {
   articleList.length = 0
   begin.value = 0
@@ -135,6 +125,11 @@ function init(query: string) {
   }
 }
 
+async function loadAllArticles() {
+  while (!noMoreData.value) {
+    await loadData()
+  }
+}
 
 // 判断是否触底
 const bottomElementIsVisible = ref(false)
