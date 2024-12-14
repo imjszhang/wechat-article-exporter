@@ -5,7 +5,7 @@
     </Teleport>
     <div class="flex flex-1 p-6 overflow-scroll">
       <p>本地数据库占用约为 <span class="text-rose-500">{{usage}}</span></p>
-      <button @click="exportDatabase" class="mt-4 p-2 bg-blue-500 text-white rounded">导出数据库</button>
+      <a href="#" @click.prevent="exportDatabase" class="mt-4 text-blue-500 underline">导出数据库</a>
     </div>
   </div>
 </template>
@@ -31,12 +31,25 @@ async function exportDatabase() {
     const db = await openDatabase(dbInfo.name!, dbInfo.version!);
     const exportData = await exportToJson(db);
     const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${dbInfo.name}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+
+    if (blob.size > 100 * 1024 * 1024) { // 如果文件大于100MB
+      const chunks = splitBlob(blob, 100 * 1024 * 1024); // 分割成100MB的块
+      chunks.forEach((chunk, index) => {
+        const url = URL.createObjectURL(chunk);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${dbInfo.name}_part${index + 1}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${dbInfo.name}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   }
 }
 
@@ -64,5 +77,16 @@ function exportToJson(db: IDBDatabase): Promise<any> {
       request.onerror = () => reject(request.error);
     }
   });
+}
+
+function splitBlob(blob: Blob, size: number): Blob[] {
+  const chunks = [];
+  let offset = 0;
+  while (offset < blob.size) {
+    const chunk = blob.slice(offset, offset + size);
+    chunks.push(chunk);
+    offset += size;
+  }
+  return chunks;
 }
 </script>
