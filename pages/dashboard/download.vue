@@ -57,6 +57,15 @@
         <div class="relative" v-else-if="selectedAccount">
           <div class="sticky top-0 z-50 bg-white flex justify-between items-center px-4 h-[40px]">
             <div class="flex items-center space-x-4">
+              <UButton
+                color="blue"
+                variant="solid"
+                :disabled="!selectedAccount"
+                @click="setActiveAccount"
+              >
+                切换为活动账号
+              </UButton>
+
               <span>过滤条件:</span>
               <UInput v-model="query.title" placeholder="请输入标题过滤" color="blue" />
 
@@ -211,6 +220,30 @@ import {type Duration, format, isSameDay, sub} from 'date-fns'
 import {useBatchDownload} from "~/composables/useBatchDownload";
 import ExcelJS from "exceljs";
 import {saveAs} from 'file-saver'
+
+
+import useActiveAccount from '~/composables/useActiveAccount';
+
+const activeAccount = useActiveAccount();
+
+function setActiveAccount() {
+  if (!selectedAccount) {
+    return;
+  }
+
+  // 找到当前选中的账号信息
+  const accountInfo = filteredAccountInfos.value.find(
+    (account) => account.fakeid === selectedAccount.value
+  );
+
+  if (accountInfo) {
+    // 设置为活动账号
+    activeAccount.value = accountInfo;
+
+    // 提示用户切换成功
+    alert(`已将账号 "${accountInfo.nickname || accountInfo.fakeid}" 设置为活动账号`);
+  }
+}
 
 
 interface Article extends AppMsgEx {
