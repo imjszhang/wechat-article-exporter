@@ -85,6 +85,7 @@
   }
 }
 </style>
+
 <script setup lang="ts">
 useHead({
   title: '缓存分析 | 微信公众号文章导出'
@@ -184,6 +185,7 @@ async function init() {
 
 // 页面加载时初始化
 await init();
+
 // 打开数据库
 function openDatabase(name: string, version: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -262,6 +264,7 @@ async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
 
   return totalSize;
 }
+
 // 导出单个数据库
 async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
   try {
