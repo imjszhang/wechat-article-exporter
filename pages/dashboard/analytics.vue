@@ -3,9 +3,52 @@
     <Teleport defer to="#title">
       <h1 class="text-[28px] leading-[34px] text-slate-12 font-bold">缓存分析</h1>
     </Teleport>
-    <div class="flex flex-1 p-6 overflow-scroll">
-      <p>本地数据库占用约为 <span class="text-rose-500">{{usage}}</span></p>
-      <a href="#" @click.prevent="exportDatabase" class="mt-4 text-blue-500 underline">导出数据库</a>
+    <div class="flex flex-1 flex-col p-6 overflow-scroll space-y-4">
+      <!-- 存储信息 -->
+      <div class="p-4 bg-slate-100 rounded-lg shadow">
+        <h2 class="text-lg font-semibold text-slate-800">存储信息</h2>
+        <p class="mt-2 text-slate-600">
+          本地数据库占用：<span class="text-rose-500">{{ usage }}</span>
+        </p>
+        <p class="text-slate-600">
+          总存储容量：<span class="text-green-500">{{ quota }}</span>
+        </p>
+        <p class="text-slate-600">
+          剩余存储容量：<span class="text-blue-500">{{ remaining }}</span>
+        </p>
+      </div>
+
+      <!-- 数据库列表 -->
+      <div v-if="databases.length > 0" class="space-y-4">
+        <h2 class="text-lg font-semibold text-slate-800">数据库列表</h2>
+        <div
+          v-for="db in databases"
+          :key="db.name"
+          class="p-4 bg-white rounded-lg shadow flex justify-between items-center"
+        >
+          <div>
+            <h3 class="text-md font-medium text-slate-800">{{ db.name }}</h3>
+            <p class="text-sm text-slate-600">版本：{{ db.version }}</p>
+            <p class="text-sm text-slate-600">大小：{{ db.size }} MB</p>
+          </div>
+          <button
+            @click="exportSingleDatabase(db)"
+            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            导出
+          </button>
+        </div>
+      </div>
+      <div v-else class="text-slate-600">没有找到任何数据库。</div>
+
+      <!-- 全部导出按钮 -->
+      <button
+        @click="exportAllDatabases"
+        class="mt-4 px-6 py-3 bg-green-500 text-white rounded hover:bg-green-600"
+        :disabled="isExporting"
+      >
+        {{ isExporting ? "正在导出..." : "导出所有数据库" }}
+      </button>
     </div>
   </div>
 </template>
@@ -15,42 +58,70 @@ useHead({
   title: '缓存分析 | 微信公众号文章导出'
 });
 
-const usage = ref('')
+const usage = ref('');
+const quota = ref('');
+const remaining = ref('');
+const databases = ref<{ name: string; version: number; size: string }[]>([]);
+const isExporting = ref(false);
 
 async function init() {
-  const storageUsage = await navigator.storage.estimate()
-  const indexedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2)
-  usage.value = indexedSize + 'M'
+  try {
+    const storageUsage = await navigator.storage.estimate();
+    const usedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2);
+    const totalSize = (storageUsage.quota! / 1024 / 1024).toFixed(2);
+    const remainingSize = (storageUsage.quota! - storageUsage.usage!) / 1024 / 1024;
+
+    usage.value = usedSize + ' MB';
+    quota.value = totalSize + ' MB';
+    remaining.value = remainingSize.toFixed(2) + ' MB';
+
+    const dbs = await indexedDB.databases();
+    databases.value = await Promise.all(
+      dbs.map(async (dbInfo) => {
+        const db = await openDatabase(dbInfo.name!, dbInfo.version!);
+        const size = await calculateDatabaseSize(db);
+        return {
+          name: dbInfo.name!,
+          version: dbInfo.version!,
+          size: size.toFixed(2),
+        };
+      })
+    );
+  } catch (error) {
+    console.error("初始化失败：", error);
+  }
 }
 
-await init()
+await init();
 
-async function exportDatabase() {
-  const dbs = await indexedDB.databases();
-  for (const dbInfo of dbs) {
-    const db = await openDatabase(dbInfo.name!, dbInfo.version!);
+async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
+  try {
+    const db = await openDatabase(dbInfo.name, dbInfo.version);
     const exportData = await exportToJson(db);
     const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${dbInfo.name}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error(`导出数据库 ${dbInfo.name} 失败：`, error);
+    alert(`导出数据库 ${dbInfo.name} 失败，请检查控制台日志。`);
+  }
+}
 
-    if (blob.size > 100 * 1024 * 1024) { // 如果文件大于100MB
-      const chunks = splitBlob(blob, 100 * 1024 * 1024); // 分割成100MB的块
-      chunks.forEach((chunk, index) => {
-        const url = URL.createObjectURL(chunk);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${dbInfo.name}_part${index + 1}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      });
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${dbInfo.name}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+async function exportAllDatabases() {
+  isExporting.value = true;
+  for (const db of databases.value) {
+    try {
+      await exportSingleDatabase(db);
+    } catch (error) {
+      console.error(`导出数据库 ${db.name} 失败：`, error);
     }
   }
+  isExporting.value = false;
+  alert("所有数据库导出完成！");
 }
 
 function openDatabase(name: string, version: number): Promise<IDBDatabase> {
@@ -79,14 +150,23 @@ function exportToJson(db: IDBDatabase): Promise<any> {
   });
 }
 
-function splitBlob(blob: Blob, size: number): Blob[] {
-  const chunks = [];
-  let offset = 0;
-  while (offset < blob.size) {
-    const chunk = blob.slice(offset, offset + size);
-    chunks.push(chunk);
-    offset += size;
+async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
+  let totalSize = 0;
+
+  for (const storeName of db.objectStoreNames) {
+    const transaction = db.transaction(storeName, 'readonly');
+    const store = transaction.objectStore(storeName);
+    const request = store.getAll();
+    await new Promise<void>((resolve, reject) => {
+      request.onsuccess = () => {
+        const data = request.result;
+        totalSize += JSON.stringify(data).length / 1024 / 1024; // 转换为 MB
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
   }
-  return chunks;
+
+  return totalSize;
 }
 </script>
