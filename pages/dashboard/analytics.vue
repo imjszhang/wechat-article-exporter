@@ -64,19 +64,53 @@
     </div>
   </div>
 </template>
+<style>
+/* 加载动画样式 */
+.loader {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
 
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+</style>
 <script setup lang="ts">
 useHead({
   title: '缓存分析 | 微信公众号文章导出'
 });
 
+// 响应式变量
 const usage = ref('');
 const quota = ref('');
 const remaining = ref('');
 const databases = ref<{ name: string; version: number; size: string }[]>([]);
-const isLoading = ref(true); // 新增：加载状态
-const isExporting = ref(false);
+const isLoading = ref(true); // 加载状态
+const isExporting = ref(false); // 导出状态
 
+// 检测隐私模式
+async function detectPrivateMode(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const db = indexedDB.open("test");
+    db.onerror = () => resolve(true); // 如果 IndexedDB 不可用，可能是隐私模式
+    db.onsuccess = () => {
+      db.result.close();
+      indexedDB.deleteDatabase("test");
+      resolve(false); // IndexedDB 可用，说明不是隐私模式
+    };
+  });
+}
+
+// 初始化函数
 async function init() {
   try {
     isLoading.value = true;
@@ -138,8 +172,86 @@ async function init() {
   }
 }
 
+// 页面加载时初始化
 await init();
+// 打开数据库
+function openDatabase(name: string, version: number): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    try {
+      const request = indexedDB.open(name, version);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => {
+        console.error(`打开数据库 ${name} 失败：`, request.error);
+        reject(request.error);
+      };
+    } catch (error) {
+      console.error(`无法打开数据库 ${name}：`, error);
+      reject(error);
+    }
+  });
+}
 
+// 导出数据库为 JSON
+function exportToJson(db: IDBDatabase): Promise<any> {
+  return new Promise((resolve, reject) => {
+    try {
+      const transaction = db.transaction(db.objectStoreNames, 'readonly');
+      const exportData: any = {};
+      let count = db.objectStoreNames.length;
+
+      transaction.oncomplete = () => resolve(exportData);
+      transaction.onerror = () => {
+        console.error("事务失败：", transaction.error);
+        reject(transaction.error);
+      };
+
+      for (const storeName of db.objectStoreNames) {
+        const store = transaction.objectStore(storeName);
+        const request = store.getAll();
+        request.onsuccess = () => {
+          exportData[storeName] = request.result;
+          if (--count === 0) resolve(exportData);
+        };
+        request.onerror = () => {
+          console.error(`读取对象存储 ${storeName} 失败：`, request.error);
+          reject(request.error);
+        };
+      }
+    } catch (error) {
+      console.error("导出数据库失败：", error);
+      reject(error);
+    }
+  });
+}
+
+// 计算数据库大小
+async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
+  let totalSize = 0;
+
+  for (const storeName of db.objectStoreNames) {
+    try {
+      const transaction = db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const request = store.getAll();
+      await new Promise<void>((resolve, reject) => {
+        request.onsuccess = () => {
+          const data = request.result;
+          totalSize += JSON.stringify(data).length / 1024 / 1024; // 转换为 MB
+          resolve();
+        };
+        request.onerror = () => {
+          console.error(`读取对象存储 ${storeName} 失败：`, request.error);
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error(`计算对象存储 ${storeName} 大小失败：`, error);
+    }
+  }
+
+  return totalSize;
+}
+// 导出单个数据库
 async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
   try {
     const db = await openDatabase(dbInfo.name, dbInfo.version);
@@ -157,6 +269,7 @@ async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
   }
 }
 
+// 导出所有数据库
 async function exportAllDatabases() {
   isExporting.value = true;
   for (const db of databases.value) {
@@ -169,71 +282,4 @@ async function exportAllDatabases() {
   isExporting.value = false;
   alert("所有数据库导出完成！");
 }
-
-function openDatabase(name: string, version: number): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, version);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function exportToJson(db: IDBDatabase): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(db.objectStoreNames, 'readonly');
-    const exportData: any = {};
-    let count = db.objectStoreNames.length;
-
-    for (const storeName of db.objectStoreNames) {
-      const store = transaction.objectStore(storeName);
-      const request = store.getAll();
-      request.onsuccess = () => {
-        exportData[storeName] = request.result;
-        if (--count === 0) resolve(exportData);
-      };
-      request.onerror = () => reject(request.error);
-    }
-  });
-}
-
-async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
-  let totalSize = 0;
-
-  for (const storeName of db.objectStoreNames) {
-    const transaction = db.transaction(storeName, 'readonly');
-    const store = transaction.objectStore(storeName);
-    const request = store.getAll();
-    await new Promise<void>((resolve, reject) => {
-      request.onsuccess = () => {
-        const data = request.result;
-        totalSize += JSON.stringify(data).length / 1024 / 1024; // 转换为 MB
-        resolve();
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  return totalSize;
-}
 </script>
-
-<style>
-/* 加载动画样式 */
-.loader {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-</style>
