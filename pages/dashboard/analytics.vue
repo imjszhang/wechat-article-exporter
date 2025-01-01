@@ -85,7 +85,6 @@
   }
 }
 </style>
-
 <script setup lang="ts">
 useHead({
   title: '缓存分析 | 微信公众号文章导出'
@@ -186,7 +185,6 @@ async function init() {
 // 页面加载时初始化
 await init();
 
-// 打开数据库
 function openDatabase(name: string, version: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     try {
@@ -203,7 +201,6 @@ function openDatabase(name: string, version: number): Promise<IDBDatabase> {
   });
 }
 
-// 导出数据库为 JSON
 function exportToJson(db: IDBDatabase): Promise<any> {
   return new Promise((resolve, reject) => {
     try {
@@ -219,11 +216,21 @@ function exportToJson(db: IDBDatabase): Promise<any> {
 
       for (const storeName of db.objectStoreNames) {
         const store = transaction.objectStore(storeName);
-        const request = store.getAll();
-        request.onsuccess = () => {
-          exportData[storeName] = request.result;
-          if (--count === 0) resolve(exportData);
+        const data: any[] = [];
+        const request = store.openCursor(); // 使用游标读取数据
+
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            data.push(cursor.value); // 将当前记录添加到数组
+            cursor.continue(); // 移动到下一条记录
+          } else {
+            // 游标遍历完成
+            exportData[storeName] = data;
+            if (--count === 0) resolve(exportData);
+          }
         };
+
         request.onerror = () => {
           console.error(`读取对象存储 ${storeName} 失败：`, request.error);
           exportData[storeName] = []; // 即使失败，也返回空数组
@@ -237,35 +244,6 @@ function exportToJson(db: IDBDatabase): Promise<any> {
   });
 }
 
-// 计算数据库大小
-async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
-  let totalSize = 0;
-
-  for (const storeName of db.objectStoreNames) {
-    try {
-      const transaction = db.transaction(storeName, 'readonly');
-      const store = transaction.objectStore(storeName);
-      const request = store.getAll();
-      await new Promise<void>((resolve, reject) => {
-        request.onsuccess = () => {
-          const data = request.result;
-          totalSize += JSON.stringify(data).length / 1024 / 1024; // 转换为 MB
-          resolve();
-        };
-        request.onerror = () => {
-          console.error(`读取对象存储 ${storeName} 失败：`, request.error);
-          reject(request.error);
-        };
-      });
-    } catch (error) {
-      console.error(`计算对象存储 ${storeName} 大小失败：`, error);
-    }
-  }
-
-  return totalSize;
-}
-
-// 导出单个数据库
 async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
   try {
     const db = await openDatabase(dbInfo.name, dbInfo.version);
@@ -283,7 +261,6 @@ async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
   }
 }
 
-// 导出所有数据库
 async function exportAllDatabases() {
   isExporting.value = true;
   for (const db of databases.value) {
