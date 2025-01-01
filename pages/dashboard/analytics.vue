@@ -64,6 +64,7 @@
     </div>
   </div>
 </template>
+
 <style>
 /* 加载动画样式 */
 .loader {
