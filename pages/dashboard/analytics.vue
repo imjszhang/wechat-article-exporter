@@ -155,13 +155,22 @@ async function init() {
 
     databases.value = await Promise.all(
       dbs.map(async (dbInfo) => {
-        const db = await openDatabase(dbInfo.name!, dbInfo.version!);
-        const size = await calculateDatabaseSize(db);
-        return {
-          name: dbInfo.name!,
-          version: dbInfo.version!,
-          size: size.toFixed(2),
-        };
+        try {
+          const db = await openDatabase(dbInfo.name!, dbInfo.version!);
+          const size = await calculateDatabaseSize(db);
+          return {
+            name: dbInfo.name!,
+            version: dbInfo.version!,
+            size: size.toFixed(2),
+          };
+        } catch (error) {
+          console.error(`无法获取数据库 ${dbInfo.name} 的信息：`, error);
+          return {
+            name: dbInfo.name!,
+            version: dbInfo.version!,
+            size: "未知",
+          };
+        }
       })
     );
   } catch (error) {
@@ -214,7 +223,8 @@ function exportToJson(db: IDBDatabase): Promise<any> {
         };
         request.onerror = () => {
           console.error(`读取对象存储 ${storeName} 失败：`, request.error);
-          reject(request.error);
+          exportData[storeName] = []; // 即使失败，也返回空数组
+          if (--count === 0) resolve(exportData);
         };
       }
     } catch (error) {
