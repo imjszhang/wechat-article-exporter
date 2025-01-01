@@ -79,8 +79,29 @@ const isExporting = ref(false);
 
 async function init() {
   try {
-    isLoading.value = true; // 开始加载
+    isLoading.value = true;
+
+    // 检查浏览器支持
+    if (!('indexedDB' in window)) {
+      alert("您的浏览器不支持 IndexedDB，请更换浏览器后重试。");
+      return;
+    }
+
+    // 检查隐私模式
+    const isPrivateMode = await detectPrivateMode();
+    if (isPrivateMode) {
+      alert("您当前处于隐私模式，IndexedDB 功能可能无法正常使用。");
+      return;
+    }
+
+    // 检查存储配额
     const storageUsage = await navigator.storage.estimate();
+    if (storageUsage.usage >= storageUsage.quota) {
+      alert("存储空间已满，请清理浏览器缓存后重试。");
+      return;
+    }
+
+    // 获取存储信息
     const usedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2);
     const totalSize = (storageUsage.quota! / 1024 / 1024).toFixed(2);
     const remainingSize = (storageUsage.quota! - storageUsage.usage!) / 1024 / 1024;
@@ -89,7 +110,15 @@ async function init() {
     quota.value = totalSize + ' MB';
     remaining.value = remainingSize.toFixed(2) + ' MB';
 
-    const dbs = await indexedDB.databases();
+    // 获取数据库列表
+    const dbs = [];
+    if ('databases' in indexedDB) {
+      dbs.push(...(await indexedDB.databases()));
+    } else {
+      console.warn("indexedDB.databases() 不可用，尝试直接打开默认数据库。");
+      dbs.push({ name: "default", version: 1 });
+    }
+
     databases.value = await Promise.all(
       dbs.map(async (dbInfo) => {
         const db = await openDatabase(dbInfo.name!, dbInfo.version!);
@@ -105,7 +134,7 @@ async function init() {
     console.error("初始化失败：", error);
     alert("加载数据失败，请检查控制台日志。");
   } finally {
-    isLoading.value = false; // 加载完成
+    isLoading.value = false;
   }
 }
 
