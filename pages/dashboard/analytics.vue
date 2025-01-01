@@ -45,8 +45,9 @@
       <button
         @click="exportAllDatabases"
         class="mt-4 px-6 py-3 bg-green-500 text-white rounded hover:bg-green-600"
+        :disabled="isExporting"
       >
-        导出所有数据库
+        {{ isExporting ? "正在导出..." : "导出所有数据库" }}
       </button>
     </div>
   </div>
@@ -61,49 +62,66 @@ const usage = ref('');
 const quota = ref('');
 const remaining = ref('');
 const databases = ref<{ name: string; version: number; size: string }[]>([]);
+const isExporting = ref(false);
 
 async function init() {
-  const storageUsage = await navigator.storage.estimate();
-  const usedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2);
-  const totalSize = (storageUsage.quota! / 1024 / 1024).toFixed(2);
-  const remainingSize = (storageUsage.quota! - storageUsage.usage!) / 1024 / 1024;
+  try {
+    const storageUsage = await navigator.storage.estimate();
+    const usedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2);
+    const totalSize = (storageUsage.quota! / 1024 / 1024).toFixed(2);
+    const remainingSize = (storageUsage.quota! - storageUsage.usage!) / 1024 / 1024;
 
-  usage.value = usedSize + ' MB';
-  quota.value = totalSize + ' MB';
-  remaining.value = remainingSize.toFixed(2) + ' MB';
+    usage.value = usedSize + ' MB';
+    quota.value = totalSize + ' MB';
+    remaining.value = remainingSize.toFixed(2) + ' MB';
 
-  const dbs = await indexedDB.databases();
-  databases.value = await Promise.all(
-    dbs.map(async (dbInfo) => {
-      const db = await openDatabase(dbInfo.name!, dbInfo.version!);
-      const size = await calculateDatabaseSize(db);
-      return {
-        name: dbInfo.name!,
-        version: dbInfo.version!,
-        size: size.toFixed(2),
-      };
-    })
-  );
+    const dbs = await indexedDB.databases();
+    databases.value = await Promise.all(
+      dbs.map(async (dbInfo) => {
+        const db = await openDatabase(dbInfo.name!, dbInfo.version!);
+        const size = await calculateDatabaseSize(db);
+        return {
+          name: dbInfo.name!,
+          version: dbInfo.version!,
+          size: size.toFixed(2),
+        };
+      })
+    );
+  } catch (error) {
+    console.error("初始化失败：", error);
+  }
 }
 
 await init();
 
 async function exportSingleDatabase(dbInfo: { name: string; version: number }) {
-  const db = await openDatabase(dbInfo.name, dbInfo.version);
-  const exportData = await exportToJson(db);
-  const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${dbInfo.name}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  try {
+    const db = await openDatabase(dbInfo.name, dbInfo.version);
+    const exportData = await exportToJson(db);
+    const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${dbInfo.name}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error(`导出数据库 ${dbInfo.name} 失败：`, error);
+    alert(`导出数据库 ${dbInfo.name} 失败，请检查控制台日志。`);
+  }
 }
 
 async function exportAllDatabases() {
+  isExporting.value = true;
   for (const db of databases.value) {
-    await exportSingleDatabase(db);
+    try {
+      await exportSingleDatabase(db);
+    } catch (error) {
+      console.error(`导出数据库 ${db.name} 失败：`, error);
+    }
   }
+  isExporting.value = false;
+  alert("所有数据库导出完成！");
 }
 
 function openDatabase(name: string, version: number): Promise<IDBDatabase> {
@@ -133,18 +151,19 @@ function exportToJson(db: IDBDatabase): Promise<any> {
 }
 
 async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
-  const transaction = db.transaction(db.objectStoreNames, 'readonly');
   let totalSize = 0;
 
   for (const storeName of db.objectStoreNames) {
+    const transaction = db.transaction(storeName, 'readonly');
     const store = transaction.objectStore(storeName);
     const request = store.getAll();
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       request.onsuccess = () => {
         const data = request.result;
         totalSize += JSON.stringify(data).length / 1024 / 1024; // 转换为 MB
         resolve();
       };
+      request.onerror = () => reject(request.error);
     });
   }
 
