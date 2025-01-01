@@ -111,6 +111,41 @@ async function detectPrivateMode(): Promise<boolean> {
   });
 }
 
+async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
+  let totalSize = 0; // 总大小（以 MB 为单位）
+
+  for (const storeName of db.objectStoreNames) {
+    try {
+      const transaction = db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const request = store.openCursor(); // 使用游标逐条读取数据
+
+      await new Promise<void>((resolve, reject) => {
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            // 将当前记录的大小累加到总大小
+            totalSize += JSON.stringify(cursor.value).length / 1024 / 1024; // 转换为 MB
+            cursor.continue(); // 移动到下一条记录
+          } else {
+            // 游标遍历完成
+            resolve();
+          }
+        };
+
+        request.onerror = () => {
+          console.error(`读取对象存储 ${storeName} 失败：`, request.error);
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error(`计算对象存储 ${storeName} 大小失败：`, error);
+    }
+  }
+
+  return totalSize; // 返回总大小
+}
+
 // 初始化函数
 async function init() {
   try {
