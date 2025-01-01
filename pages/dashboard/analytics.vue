@@ -30,6 +30,57 @@
         </p>
       </div>
 
+      <!-- PocketBase 同步设置 -->
+      <div class="p-4 bg-slate-100 rounded-lg shadow">
+        <h2 class="text-lg font-semibold text-slate-800">PocketBase 同步设置</h2>
+        <div class="mt-4 space-y-4">
+          <!-- PocketBase 服务器地址 -->
+          <div>
+            <label for="pbServer" class="block text-sm font-medium text-slate-700">服务器地址</label>
+            <input
+              id="pbServer"
+              v-model="pocketBaseConfig.server"
+              type="text"
+              class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              placeholder="https://example.com"
+            />
+          </div>
+
+          <!-- API 密钥 -->
+          <div>
+            <label for="pbApiKey" class="block text-sm font-medium text-slate-700">API 密钥</label>
+            <input
+              id="pbApiKey"
+              v-model="pocketBaseConfig.apiKey"
+              type="password"
+              class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              placeholder="请输入 API 密钥"
+            />
+          </div>
+
+          <!-- 数据库名称 -->
+          <div>
+            <label for="pbDatabase" class="block text-sm font-medium text-slate-700">数据库名称</label>
+            <input
+              id="pbDatabase"
+              v-model="pocketBaseConfig.database"
+              type="text"
+              class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              placeholder="请输入数据库名称"
+            />
+          </div>
+
+          <!-- 保存按钮 -->
+          <button
+            @click="savePocketBaseConfig"
+            class="mt-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+          >
+            保存设置
+          </button>
+        </div>
+      </div>
+
+
       <!-- 数据库列表 -->
       <div v-if="databases.length > 0" class="space-y-4">
         <h2 class="text-lg font-semibold text-slate-800">数据库列表</h2>
@@ -98,6 +149,26 @@ const databases = ref<{ name: string; version: number; size: string; objectStore
 const isLoading = ref(true); // 加载状态
 const isExporting = ref(false); // 导出状态
 
+const pocketBaseConfig = ref({
+  server: localStorage.getItem('pbServer') || '', // 服务器地址
+  apiKey: localStorage.getItem('pbApiKey') || '', // API 密钥
+  database: localStorage.getItem('pbDatabase') || '', // 数据库名称
+});
+
+function savePocketBaseConfig() {
+  try {
+    // 保存到本地存储
+    localStorage.setItem('pbServer', pocketBaseConfig.value.server);
+    localStorage.setItem('pbApiKey', pocketBaseConfig.value.apiKey);
+    localStorage.setItem('pbDatabase', pocketBaseConfig.value.database);
+
+    alert('PocketBase 配置信息已保存！');
+  } catch (error) {
+    console.error('保存 PocketBase 配置信息失败：', error);
+    alert('保存失败，请检查控制台日志。');
+  }
+}
+
 async function calculateStorageInfo() {
   if ('storage' in navigator && 'estimate' in navigator.storage) {
     try {
@@ -164,7 +235,7 @@ async function init() {
 
     // 计算存储信息
     await calculateStorageInfo();
-    
+
     // 检查浏览器支持
     if (!('indexedDB' in window)) {
       alert("您的浏览器不支持 IndexedDB，请更换浏览器后重试。");
