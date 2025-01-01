@@ -1,8 +1,20 @@
 <template>
-  <div class="flex flex-col h-full">
+  <div class="flex flex-col h-full relative">
     <Teleport defer to="#title">
       <h1 class="text-[28px] leading-[34px] text-slate-12 font-bold">缓存分析</h1>
     </Teleport>
+
+    <!-- 加载状态 -->
+    <div
+      v-if="isLoading"
+      class="absolute inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50"
+    >
+      <div class="text-center">
+        <div class="loader mb-4"></div>
+        <p class="text-slate-600">正在加载数据，请稍候...</p>
+      </div>
+    </div>
+
     <div class="flex flex-1 flex-col p-6 overflow-scroll space-y-4">
       <!-- 存储信息 -->
       <div class="p-4 bg-slate-100 rounded-lg shadow">
@@ -62,10 +74,12 @@ const usage = ref('');
 const quota = ref('');
 const remaining = ref('');
 const databases = ref<{ name: string; version: number; size: string }[]>([]);
+const isLoading = ref(true); // 新增：加载状态
 const isExporting = ref(false);
 
 async function init() {
   try {
+    isLoading.value = true; // 开始加载
     const storageUsage = await navigator.storage.estimate();
     const usedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2);
     const totalSize = (storageUsage.quota! / 1024 / 1024).toFixed(2);
@@ -89,6 +103,9 @@ async function init() {
     );
   } catch (error) {
     console.error("初始化失败：", error);
+    alert("加载数据失败，请检查控制台日志。");
+  } finally {
+    isLoading.value = false; // 加载完成
   }
 }
 
@@ -170,3 +187,24 @@ async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
   return totalSize;
 }
 </script>
+
+<style>
+/* 加载动画样式 */
+.loader {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+</style>
