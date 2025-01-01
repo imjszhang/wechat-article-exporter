@@ -98,6 +98,30 @@ const databases = ref<{ name: string; version: number; size: string; objectStore
 const isLoading = ref(true); // 加载状态
 const isExporting = ref(false); // 导出状态
 
+async function calculateStorageInfo() {
+  if ('storage' in navigator && 'estimate' in navigator.storage) {
+    try {
+      const estimate = await navigator.storage.estimate();
+      const used = estimate.usage || 0; // 已使用存储空间
+      const total = estimate.quota || 0; // 总存储容量
+
+      usage.value = (used / 1024 / 1024).toFixed(2) + ' MB'; // 转换为 MB
+      quota.value = (total / 1024 / 1024).toFixed(2) + ' MB'; // 转换为 MB
+      remaining.value = ((total - used) / 1024 / 1024).toFixed(2) + ' MB'; // 剩余存储容量
+    } catch (error) {
+      console.error("获取存储信息失败：", error);
+      usage.value = '未知';
+      quota.value = '未知';
+      remaining.value = '未知';
+    }
+  } else {
+    console.warn("浏览器不支持存储估算 API。");
+    usage.value = '不支持';
+    quota.value = '不支持';
+    remaining.value = '不支持';
+  }
+}
+
 async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
   let totalSize = 0; // 总大小（以 MB 为单位）
 
@@ -138,6 +162,9 @@ async function init() {
   try {
     isLoading.value = true;
 
+    // 计算存储信息
+    await calculateStorageInfo();
+    
     // 检查浏览器支持
     if (!('indexedDB' in window)) {
       alert("您的浏览器不支持 IndexedDB，请更换浏览器后重试。");
