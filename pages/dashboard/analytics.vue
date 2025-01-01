@@ -36,19 +36,39 @@
         <div
           v-for="db in databases"
           :key="db.name"
-          class="p-4 bg-white rounded-lg shadow flex justify-between items-center"
+          class="p-4 bg-white rounded-lg shadow flex flex-col space-y-2"
         >
-          <div>
-            <h3 class="text-md font-medium text-slate-800">{{ db.name }}</h3>
-            <p class="text-sm text-slate-600">版本：{{ db.version }}</p>
-            <p class="text-sm text-slate-600">大小：{{ db.size }} MB</p>
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="text-md font-medium text-slate-800">{{ db.name }}</h3>
+              <p class="text-sm text-slate-600">版本：{{ db.version }}</p>
+              <p class="text-sm text-slate-600">大小：{{ db.size }} MB</p>
+            </div>
+            <button
+              @click="exportSingleDatabase(db)"
+              class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              导出
+            </button>
           </div>
-          <button
-            @click="exportSingleDatabase(db)"
-            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            导出
-          </button>
+          <div>
+            <h4 class="text-sm font-semibold text-slate-700">对象存储列表</h4>
+            <ul class="mt-2 space-y-1">
+              <li
+                v-for="store in db.objectStores"
+                :key="store"
+                class="flex justify-between items-center"
+              >
+                <span class="text-sm text-slate-600">{{ store }}</span>
+                <button
+                  @click="exportSingleObjectStore(db, store)"
+                  class="px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-sm"
+                >
+                  导出
+                </button>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
       <div v-else class="text-slate-600">没有找到任何数据库。</div>
@@ -65,26 +85,6 @@
   </div>
 </template>
 
-<style>
-/* 加载动画样式 */
-.loader {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-</style>
 <script setup lang="ts">
 useHead({
   title: '缓存分析 | 微信公众号文章导出'
@@ -94,22 +94,9 @@ useHead({
 const usage = ref('');
 const quota = ref('');
 const remaining = ref('');
-const databases = ref<{ name: string; version: number; size: string }[]>([]);
+const databases = ref<{ name: string; version: number; size: string; objectStores: string[] }[]>([]);
 const isLoading = ref(true); // 加载状态
 const isExporting = ref(false); // 导出状态
-
-// 检测隐私模式
-async function detectPrivateMode(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const db = indexedDB.open("test");
-    db.onerror = () => resolve(true); // 如果 IndexedDB 不可用，可能是隐私模式
-    db.onsuccess = () => {
-      db.result.close();
-      indexedDB.deleteDatabase("test");
-      resolve(false); // IndexedDB 可用，说明不是隐私模式
-    };
-  });
-}
 
 async function calculateDatabaseSize(db: IDBDatabase): Promise<number> {
   let totalSize = 0; // 总大小（以 MB 为单位）
@@ -157,29 +144,6 @@ async function init() {
       return;
     }
 
-    // 检查隐私模式
-    const isPrivateMode = await detectPrivateMode();
-    if (isPrivateMode) {
-      alert("您当前处于隐私模式，IndexedDB 功能可能无法正常使用。");
-      return;
-    }
-
-    // 检查存储配额
-    const storageUsage = await navigator.storage.estimate();
-    if (storageUsage.usage >= storageUsage.quota) {
-      alert("存储空间已满，请清理浏览器缓存后重试。");
-      return;
-    }
-
-    // 获取存储信息
-    const usedSize = (storageUsage.usage! / 1024 / 1024).toFixed(2);
-    const totalSize = (storageUsage.quota! / 1024 / 1024).toFixed(2);
-    const remainingSize = (storageUsage.quota! - storageUsage.usage!) / 1024 / 1024;
-
-    usage.value = usedSize + ' MB';
-    quota.value = totalSize + ' MB';
-    remaining.value = remainingSize.toFixed(2) + ' MB';
-
     // 获取数据库列表
     const dbs = [];
     if ('databases' in indexedDB) {
@@ -198,6 +162,7 @@ async function init() {
             name: dbInfo.name!,
             version: dbInfo.version!,
             size: size.toFixed(2),
+            objectStores: Array.from(db.objectStoreNames),
           };
         } catch (error) {
           console.error(`无法获取数据库 ${dbInfo.name} 的信息：`, error);
@@ -205,6 +170,7 @@ async function init() {
             name: dbInfo.name!,
             version: dbInfo.version!,
             size: "未知",
+            objectStores: [],
           };
         }
       })
@@ -236,22 +202,68 @@ function openDatabase(name: string, version: number): Promise<IDBDatabase> {
   });
 }
 
+function exportObjectStore(db: IDBDatabase, storeName: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    try {
+      const transaction = db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const data: any[] = [];
+      const request = store.openCursor();
+
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          data.push(cursor.value);
+          cursor.continue();
+        } else {
+          resolve(data);
+        }
+      };
+
+      request.onerror = () => {
+        console.error(`读取对象存储 ${storeName} 失败：`, request.error);
+        reject(request.error);
+      };
+    } catch (error) {
+      console.error("导出对象存储失败：", error);
+      reject(error);
+    }
+  });
+}
+
+async function exportSingleObjectStore(dbInfo: { name: string; version: number }, storeName: string) {
+  try {
+    const db = await openDatabase(dbInfo.name, dbInfo.version);
+    const exportData = await exportObjectStore(db, storeName);
+    const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${dbInfo.name}_${storeName}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error(`导出对象存储 ${storeName} 失败：`, error);
+    alert(`导出对象存储 ${storeName} 失败，请检查控制台日志。`);
+  }
+}
+
 function exportToJson(db: IDBDatabase): Promise<any> {
   return new Promise((resolve, reject) => {
     try {
-      const transaction = db.transaction(db.objectStoreNames, 'readonly');
-      const exportData: any = {};
-      let count = db.objectStoreNames.length;
+      const transaction = db.transaction(db.objectStoreNames, 'readonly'); // 创建只读事务
+      const exportData: any = {}; // 用于存储导出的数据
+      let count = db.objectStoreNames.length; // 记录需要处理的对象存储数量
 
-      transaction.oncomplete = () => resolve(exportData);
+      transaction.oncomplete = () => resolve(exportData); // 当事务完成时，返回导出的数据
       transaction.onerror = () => {
         console.error("事务失败：", transaction.error);
-        reject(transaction.error);
+        reject(transaction.error); // 如果事务失败，返回错误
       };
 
       for (const storeName of db.objectStoreNames) {
-        const store = transaction.objectStore(storeName);
-        const data: any[] = [];
+        const store = transaction.objectStore(storeName); // 获取对象存储
+        const data: any[] = []; // 用于存储当前对象存储的数据
         const request = store.openCursor(); // 使用游标读取数据
 
         request.onsuccess = (event) => {
@@ -261,20 +273,20 @@ function exportToJson(db: IDBDatabase): Promise<any> {
             cursor.continue(); // 移动到下一条记录
           } else {
             // 游标遍历完成
-            exportData[storeName] = data;
-            if (--count === 0) resolve(exportData);
+            exportData[storeName] = data; // 将对象存储的数据添加到导出结果中
+            if (--count === 0) resolve(exportData); // 如果所有对象存储都处理完，返回结果
           }
         };
 
         request.onerror = () => {
           console.error(`读取对象存储 ${storeName} 失败：`, request.error);
           exportData[storeName] = []; // 即使失败，也返回空数组
-          if (--count === 0) resolve(exportData);
+          if (--count === 0) resolve(exportData); // 如果所有对象存储都处理完，返回结果
         };
       }
     } catch (error) {
       console.error("导出数据库失败：", error);
-      reject(error);
+      reject(error); // 如果发生错误，返回错误
     }
   });
 }
