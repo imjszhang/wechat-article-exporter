@@ -42,31 +42,31 @@
               v-model="pocketBaseConfig.server"
               type="text"
               class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="https://example.com"
+              placeholder="http://127.0.0.1:8090"
             />
           </div>
 
-          <!-- API 密钥 -->
+          <!-- Email -->
           <div>
-            <label for="pbApiKey" class="block text-sm font-medium text-slate-700">API 密钥</label>
+            <label for="pbEmail" class="block text-sm font-medium text-slate-700">Email</label>
             <input
-              id="pbApiKey"
-              v-model="pocketBaseConfig.apiKey"
+              id="pbEmail"
+              v-model="pocketBaseConfig.email"
+              type="email"
+              class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              placeholder="请输入 Email"
+            />
+          </div>
+
+          <!-- 密码 -->
+          <div>
+            <label for="pbPassword" class="block text-sm font-medium text-slate-700">密码</label>
+            <input
+              id="pbPassword"
+              v-model="pocketBaseConfig.password"
               type="password"
               class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="请输入 API 密钥"
-            />
-          </div>
-
-          <!-- 数据库名称 -->
-          <div>
-            <label for="pbDatabase" class="block text-sm font-medium text-slate-700">数据库名称</label>
-            <input
-              id="pbDatabase"
-              v-model="pocketBaseConfig.database"
-              type="text"
-              class="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="请输入数据库名称"
+              placeholder="请输入密码"
             />
           </div>
 
@@ -79,7 +79,6 @@
           </button>
         </div>
       </div>
-
 
       <!-- 数据库列表 -->
       <div v-if="databases.length > 0" class="space-y-4">
@@ -111,12 +110,21 @@
                 class="flex justify-between items-center"
               >
                 <span class="text-sm text-slate-600">{{ store }}</span>
-                <button
-                  @click="exportSingleObjectStore(db, store)"
-                  class="px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-sm"
-                >
-                  导出
-                </button>
+                <div class="flex space-x-2">
+                  <button
+                    @click="exportSingleObjectStore(db, store)"
+                    class="px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-sm"
+                  >
+                    导出
+                  </button>
+                  <button
+                    v-if="store === 'info'"
+                    @click="syncInfoObjectStore(db)"
+                    class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+                  >
+                    同步
+                  </button>
+                </div>
               </li>
             </ul>
           </div>
@@ -141,6 +149,8 @@ useHead({
   title: '缓存分析 | 微信公众号文章导出'
 });
 
+import { login, getRecords, createRecord, updateRecord, deleteRecord } from '~/utils/pocketbase';
+
 // 响应式变量
 const usage = ref('');
 const quota = ref('');
@@ -150,17 +160,17 @@ const isLoading = ref(true); // 加载状态
 const isExporting = ref(false); // 导出状态
 
 const pocketBaseConfig = ref({
-  server: localStorage.getItem('pbServer') || '', // 服务器地址
-  apiKey: localStorage.getItem('pbApiKey') || '', // API 密钥
-  database: localStorage.getItem('pbDatabase') || '', // 数据库名称
+  server: localStorage.getItem('pbServer') || 'http://127.0.0.1:8090', // 服务器地址
+  email: localStorage.getItem('pbEmail') || '', // Email
+  password: localStorage.getItem('pbPassword') || '', // 密码
 });
 
 function savePocketBaseConfig() {
   try {
     // 保存到本地存储
     localStorage.setItem('pbServer', pocketBaseConfig.value.server);
-    localStorage.setItem('pbApiKey', pocketBaseConfig.value.apiKey);
-    localStorage.setItem('pbDatabase', pocketBaseConfig.value.database);
+    localStorage.setItem('pbEmail', pocketBaseConfig.value.email);
+    localStorage.setItem('pbPassword', pocketBaseConfig.value.password);
 
     alert('PocketBase 配置信息已保存！');
   } catch (error) {
@@ -168,6 +178,51 @@ function savePocketBaseConfig() {
     alert('保存失败，请检查控制台日志。');
   }
 }
+
+async function syncInfoObjectStore(dbInfo: { name: string; version: number }) {
+  try {
+    // 打开数据库并导出 info 对象存储数据
+    const db = await openDatabase(dbInfo.name, dbInfo.version);
+    const exportData = await exportObjectStore(db, 'info');
+
+    // 登录 PocketBase
+    const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
+    if (!loginSuccess) {
+      alert('登录 PocketBase 失败，请检查配置。');
+      return;
+    }
+
+    // 获取 PocketBase 中 wechat_public_accounts 集合的现有记录
+    const collectionName = 'wechat_public_accounts';
+    const existingRecords = await getRecords(collectionName);
+
+    // 同步数据
+    for (const item of exportData) {
+      // 映射字段
+      const mappedData = {
+        account_fakeid: item.fakeid,
+        account_nickname: item.nickname,
+        round_head_img: item.round_head_img,
+      };
+
+      // 检查是否已存在
+      const existingRecord = existingRecords.find(record => record.account_fakeid === item.fakeid);
+      if (existingRecord) {
+        // 更新记录
+        await updateRecord(collectionName, existingRecord.id, mappedData);
+      } else {
+        // 创建新记录
+        await createRecord(collectionName, mappedData);
+      }
+    }
+
+    alert('info 对象存储同步成功！');
+  } catch (error) {
+    console.error('同步 info 对象存储失败：', error);
+    alert('同步 info 对象存储失败，请检查控制台日志。');
+  }
+}
+
 
 async function calculateStorageInfo() {
   if ('storage' in navigator && 'estimate' in navigator.storage) {
