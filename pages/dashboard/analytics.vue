@@ -254,13 +254,14 @@ function convertTimestampToISO(timestamp: number): string {
   return new Date(timestamp * 1000).toISOString(); // 时间戳是秒，需要乘以 1000 转为毫秒
 }
 
-async function getAllRecords(collectionName: string): Promise<any[]> {
+// 获取所有记录的方法（支持筛选）
+async function getAllRecords(collectionName: string, filter: string = ''): Promise<any[]> {
   const allRecords: any[] = [];
   let page = 1;
-  const perPage = 100; // 每页记录数
+  const perPage = 1000; // 每页记录数
 
   while (true) {
-    const records = await getRecords(collectionName, page, perPage);
+    const records = await getRecords(collectionName, page, perPage, { filter });
     allRecords.push(...records);
 
     // 如果当前页的记录数小于每页记录数，说明已到最后一页
@@ -271,23 +272,31 @@ async function getAllRecords(collectionName: string): Promise<any[]> {
     page++;
   }
 
-  console.log(`从集合 ${collectionName} 中获取了 ${allRecords.length} 条记录`);
+  console.log(`从集合 ${collectionName} 中获取了 ${allRecords.length} 条记录，筛选条件: ${filter}`);
   return allRecords;
 }
 
 async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
   try {
+    // 1. 打开本地数据库并导出 info 对象存储数据
     const db = await openDatabase(dbInfo.name, dbInfo.version);
-    const exportData = await exportObjectStore(db, 'article');
+    const infoData = await exportObjectStore(db, 'info');
 
-    // 初始化同步状态
-    syncProgress.value.total = exportData.length;
+    // 提取所有的 fakeid
+    const fakeidSet = new Set(infoData.map((item: any) => item.fakeid));
+    if (fakeidSet.size === 0) {
+      alert('未找到任何 fakeid，无法进行同步。');
+      return;
+    }
+
+    // 2. 初始化同步状态
+    syncProgress.value.total = 0; // 总条数稍后更新
     syncProgress.value.current = 0;
     syncProgress.value.isSyncing = true;
     syncProgress.value.errors = [];
     syncProgress.value.isCancelled = false;
 
-    // 登录 PocketBase
+    // 3. 登录 PocketBase
     const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
     if (!loginSuccess) {
       alert('登录 PocketBase 失败，请检查配置。');
@@ -295,13 +304,19 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
       return;
     }
 
+    // 4. 获取 PocketBase 中的现有记录，使用 fakeid 作为筛选条件
     const collectionName = 'wechat_articles';
-    const existingRecords = await getAllRecords(collectionName); // 获取所有记录
+    const filter = `fakeid in (${Array.from(fakeidSet).map(id => `"${id}"`).join(',')})`;
+    const existingRecords = await getAllRecords(collectionName, filter);
 
     // 创建一个 Set 存储已存在的标准化 link，用于快速查找
     const existingLinks = new Set(existingRecords.map(record => normalizeUrl(record.link)));
 
-    // 分页同步
+    // 5. 导出本地数据库中的 article 对象存储数据
+    const exportData = await exportObjectStore(db, 'article');
+    syncProgress.value.total = exportData.length; // 更新总条数
+
+    // 6. 分页同步
     const batchSize = 100; // 每次同步 100 条
     for (let i = 0; i < exportData.length; i += batchSize) {
       if (syncProgress.value.isCancelled) {
@@ -328,10 +343,17 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
             continue;
           }
 
+          // 检查当前记录的 fakeid 是否在 fakeidSet 中
+          if (!fakeidSet.has(item.fakeid)) {
+            console.log(`跳过不属于指定 fakeid 的记录: ${item.link}`);
+            syncProgress.value.current++;
+            continue;
+          }
+
           // 映射字段并转换 update_time
           const mappedData = {
             title: item.title,
-            link: item.link, 
+            link: item.link,
             cover: item.cover,
             update_time: convertTimestampToISO(item.update_time),
             digest: item.digest,
@@ -389,6 +411,7 @@ async function syncInfoObjectStore(dbInfo: { name: string; version: number }) {
         fakeid: item.fakeid,
         nickname: item.nickname,
         round_head_img: item.round_head_img,
+        articles: item.articles,
       };
 
       // 检查是否已存在
