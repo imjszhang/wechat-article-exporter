@@ -208,7 +208,7 @@
   async function getAllRecords(collectionName: string, filter: string = ''): Promise<any[]> {
     const allRecords: any[] = [];
     let page = 1;
-    const perPage = 100; // 每页记录数
+    const perPage = 1000; // 每页记录数
   
     while (true) {
       const records = await getRecords(collectionName, page, perPage, { filter });
