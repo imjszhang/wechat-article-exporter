@@ -103,7 +103,8 @@ const items = ref([
   {name: '缓存分析', icon: ChartNoAxesCombined, href: '/dashboard/analytics'},
   {name: '资源额度', icon: Globe, href: '/dashboard/usage'},
   {name: '设置', icon: Settings, href: '/dashboard/settings'},
-  {name: '技术支持', icon: HeartHandshake, href: '/dashboard/support'},
+  {name: '技术支持', icon: HeartHandshake, href: '/dashboard/support'},  
+  {name: 'PB数据', icon: Globe, href: '/dashboard/pb-data' },
 ])
 
 const expire = loginAccount.value.expires
