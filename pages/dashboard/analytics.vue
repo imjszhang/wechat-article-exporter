@@ -149,6 +149,36 @@
       </button>
     </div>
   </div>
+
+<div v-if="syncProgress.isSyncing" class="fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
+  <div class="text-center">
+    <p class="text-slate-600 mb-4">正在同步数据，请稍候...</p>
+    <div class="w-64 bg-gray-200 rounded-full h-4">
+      <div
+        class="bg-blue-500 h-4 rounded-full"
+        :style="{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }"
+      ></div>
+    </div>
+    <p class="text-slate-600 mt-2">
+      已同步 {{ syncProgress.current }} / {{ syncProgress.total }} 条
+    </p>
+    <button
+      @click="cancelSync"
+      class="mt-4 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+    >
+      取消同步
+    </button>
+  </div>
+</div>
+
+<div v-if="syncProgress.errors.length > 0" class="mt-4 p-4 bg-red-100 text-red-700 rounded">
+  <h3 class="font-semibold">同步失败的记录：</h3>
+  <ul class="list-disc pl-5">
+    <li v-for="(error, index) in syncProgress.errors" :key="index">
+      {{ error }}
+    </li>
+  </ul>
+</div>
 </template>
 
 <script setup lang="ts">
@@ -187,52 +217,102 @@ function savePocketBaseConfig() {
 }
 
 
+const syncProgress = ref({
+  current: 0, // 当前已同步的条数
+  total: 0,   // 总条数
+  isSyncing: false, // 是否正在同步
+  errors: [] as string[], // 记录同步失败的错误信息
+  isCancelled: false, // 是否取消同步
+});
+
+function cancelSync() {
+  syncProgress.value.isCancelled = true;
+}
+
+function convertTimestampToISO(timestamp: number): string {
+  return new Date(timestamp * 1000).toISOString(); // 时间戳是秒，需要乘以 1000 转为毫秒
+}
+
 async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
   try {
-    // 打开数据库并导出 article 对象存储数据
     const db = await openDatabase(dbInfo.name, dbInfo.version);
-    const exportData = await exportObjectStore(db, 'article'); // 假设对象存储名为 'article'
+    const exportData = await exportObjectStore(db, 'article');
 
-    // 登录 PocketBase
+    // 初始化同步状态
+    syncProgress.value.total = exportData.length;
+    syncProgress.value.current = 0;
+    syncProgress.value.isSyncing = true;
+    syncProgress.value.errors = [];
+    syncProgress.value.isCancelled = false;
+
     const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
     if (!loginSuccess) {
       alert('登录 PocketBase 失败，请检查配置。');
+      syncProgress.value.isSyncing = false;
       return;
     }
 
-    // 获取 PocketBase 中 wechat_articles 集合的现有记录
     const collectionName = 'wechat_articles';
     const existingRecords = await getRecords(collectionName);
+    const existingLinks = new Set(existingRecords.map(record => record.link));
 
-    // 同步数据
-    for (const item of exportData) {
-      // 映射字段
-      const mappedData = {
-        title: item.title,
-        link: item.link,
-        cover: item.cover,
-        update_time: item.update_time,
-        digest: item.digest,
-        author_name: item.author_name,
-        is_deleted: item.is_deleted,
-        fakeid: item.fakeid,
-      };
+    // 分页同步
+    const batchSize = 100; // 每次同步 100 条
+    for (let i = 0; i < exportData.length; i += batchSize) {
+      if (syncProgress.value.isCancelled) {
+        console.log('同步已取消');
+        break;
+      }
 
-      // 检查是否已存在（通过 link 字段唯一识别）
-      const existingRecord = existingRecords.find(record => record.link === item.link);
-      if (existingRecord) {
-        // 更新记录
-        await updateRecord(collectionName, existingRecord.id, mappedData);
-      } else {
-        // 创建新记录
-        await createRecord(collectionName, mappedData);
+      const batch = exportData.slice(i, i + batchSize);
+
+      for (const item of batch) {
+        if (syncProgress.value.isCancelled) {
+          console.log('同步已取消');
+          break;
+        }
+
+        try {
+          // 如果 link 已存在，跳过同步
+          if (existingLinks.has(item.link)) {
+            syncProgress.value.current++;
+            continue;
+          }
+
+          // 映射字段并转换 update_time
+          const mappedData = {
+            title: item.title,
+            link: item.link,
+            cover: item.cover,
+            update_time: convertTimestampToISO(item.update_time),
+            digest: item.digest,
+            author_name: item.author_name,
+            is_deleted: item.is_deleted,
+            fakeid: item.fakeid,
+          };
+
+          // 创建新记录
+          await createRecord(collectionName, mappedData);
+
+          // 更新进度
+          syncProgress.value.current++;
+        } catch (error) {
+          // 记录错误信息
+          syncProgress.value.errors.push(`同步失败：${item.link}，错误：${error.message}`);
+          console.error(`同步失败：${item.link}`, error);
+        }
       }
     }
 
-    alert('article 对象存储同步成功！');
+    // 显示同步结果
+    const successCount = syncProgress.value.current;
+    const errorCount = syncProgress.value.errors.length;
+    alert(`同步完成！成功：${successCount} 条，失败：${errorCount} 条`);
   } catch (error) {
     console.error('同步 article 对象存储失败：', error);
     alert('同步 article 对象存储失败，请检查控制台日志。');
+  } finally {
+    syncProgress.value.isSyncing = false;
   }
 }
 
