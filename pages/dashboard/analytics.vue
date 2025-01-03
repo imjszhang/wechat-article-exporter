@@ -200,8 +200,8 @@ async function syncInfoObjectStore(dbInfo: { name: string; version: number }) {
     for (const item of exportData) {
       // 映射字段
       const mappedData = {
-        account_fakeid: item.fakeid,
-        account_nickname: item.nickname,
+        fakeid: item.fakeid,
+        nickname: item.nickname,
         round_head_img: item.round_head_img,
       };
 
