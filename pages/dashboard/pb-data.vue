@@ -93,7 +93,7 @@
                 <tr v-for="(article, index) in articles" :key="article.id">
                   <td class="text-center font-mono">{{ index + 1 }}</td>
                   <td class="px-4 font-mono">{{ maxLen(article.title) }}</td>
-                  <td class="text-center font-mono">{{ formatTimeStamp(article.update_time) }}</td>
+                  <td class="text-center font-mono">{{ article.update_time }}</td>
                   <td class="text-center">{{ article.author_name }}</td>
                   <td class="text-center">
                     {{ article.is_original ? '原创' : '非原创' }}

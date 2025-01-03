@@ -32,9 +32,26 @@ export async function login(email: string, password: string): Promise<boolean> {
 }
 
 // 获取记录列表
-export async function getRecords(collectionName: string, page: number = 1, perPage: number = 30): Promise<any[]> {
+export async function getRecords(
+  collectionName: string,
+  page: number = 1,
+  perPage: number = 30,
+  queryParams: Record<string, any> = {} // 新增的查询参数
+): Promise<any[]> {
   try {
-    const response = await fetch(`${BASE_URL}/api/collections/${collectionName}/records?page=${page}&perPage=${perPage}`, {
+    // 构建查询字符串
+    const query = new URLSearchParams({
+      page: page.toString(),
+      perPage: perPage.toString(),
+      ...Object.fromEntries(
+        Object.entries(queryParams).map(([key, value]) => [key, String(value)])
+      ),
+    }).toString();
+
+    // 拼接完整的 URL
+    const url = `${BASE_URL}/api/collections/${collectionName}/records?${query}`;
+
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': authToken ? `Bearer ${authToken}` : '',
