@@ -47,7 +47,7 @@ export async function getRecords(
         Object.entries(queryParams).map(([key, value]) => {
           // 对 filter 参数进行特殊处理，确保其值被正确编码
           if (key === 'filter') {
-            return [key, encodeURIComponent(value)]; // 对 filter 的值进行 URL 编码
+            return [key, value]; // 不对 filter 的值进行 String 转换
           }
           return [key, String(value)];
         })
