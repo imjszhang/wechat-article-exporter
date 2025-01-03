@@ -309,7 +309,7 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
           // 映射字段并转换 update_time
           const mappedData = {
             title: item.title,
-            link: item.link, // 保留原始 link
+            link: item.link, 
             cover: item.cover,
             update_time: convertTimestampToISO(item.update_time),
             digest: item.digest,
@@ -370,7 +370,7 @@ async function syncInfoObjectStore(dbInfo: { name: string; version: number }) {
       };
 
       // 检查是否已存在
-      const existingRecord = existingRecords.find(record => record.account_fakeid === item.fakeid);
+      const existingRecord = existingRecords.find(record => record.fakeid === item.fakeid);
       if (existingRecord) {
         // 更新记录
         await updateRecord(collectionName, existingRecord.id, mappedData);
