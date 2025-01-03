@@ -44,12 +44,21 @@ export async function getRecords(
       page: page.toString(),
       perPage: perPage.toString(),
       ...Object.fromEntries(
-        Object.entries(queryParams).map(([key, value]) => [key, String(value)])
+        Object.entries(queryParams).map(([key, value]) => {
+          // 对 filter 参数进行特殊处理，确保其值被正确编码
+          if (key === 'filter') {
+            return [key, value]; // 不对 filter 的值进行 String 转换
+          }
+          return [key, String(value)];
+        })
       ),
     }).toString();
 
     // 拼接完整的 URL
     const url = `${BASE_URL}/api/collections/${collectionName}/records?${query}`;
+
+    // 调试输出 URL
+    console.log(`请求 URL: ${url}`);
 
     const response = await fetch(url, {
       method: 'GET',

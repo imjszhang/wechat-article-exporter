@@ -307,9 +307,7 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
     // 4. 获取 PocketBase 中的现有记录，使用 fakeid 作为筛选条件
     const collectionName = 'wechat_articles';
     const filter = `fakeid in (${Array.from(fakeidSet).map(id => `"${id}"`).join(',')})`;
-
-    // 使用 getRecords 传递 filter 参数
-    const existingRecords = await getAllRecords(collectionName, { filter });
+    const existingRecords = await getAllRecords(collectionName, filter);
 
     // 创建一个 Set 存储已存在的标准化 link，用于快速查找
     const existingLinks = new Set(existingRecords.map(record => normalizeUrl(record.link)));
