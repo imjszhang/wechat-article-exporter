@@ -258,7 +258,7 @@
       if (!isLoggedIn) return;
   
       // 使用筛选条件获取文章数据
-      const filter = `fakeid="${accountId}" and is_deleted=False`;
+      const filter = `fakeid="${accountId}"`;
       const records = await getAllRecords('wechat_articles', filter);
       articles.length = 0;
       articles.push(
