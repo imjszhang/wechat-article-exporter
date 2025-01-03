@@ -77,11 +77,47 @@
                 >
                   切换为活动账号
                 </UButton>
+  
+                <span>过滤条件:</span>
+                <UInput v-model="query.title" placeholder="请输入标题过滤" color="blue" />
+  
+                <USelectMenu
+                  class="w-40"
+                  color="blue"
+                  v-model="query.authors"
+                  :options="articleAuthors"
+                  multiple
+                  placeholder="选择作者"
+                />
+  
+                <USelect v-model="query.isOriginal" :options="originalOptions" color="blue" />
+  
+                <UButton color="gray" variant="solid" @click="search">搜索</UButton>
+              </div>
+              <div class="space-x-2">
+                <UButton
+                  color="black"
+                  variant="solid"
+                  class="disabled:bg-slate-4 disabled:text-slate-12"
+                  :disabled="selectedArticles.length === 0 || excelBtnLoading"
+                  @click="excelExport"
+                >
+                  导出Excel
+                </UButton>
               </div>
             </div>
             <table class="w-full border-collapse">
               <thead class="sticky top-[40px] z-10 h-[40px] bg-white">
                 <tr>
+                  <th>
+                    <UCheckbox
+                      class="justify-center"
+                      :indeterminate="isIndeterminate"
+                      v-model="checkAll"
+                      @change="onCheckAllChange"
+                      color="blue"
+                    />
+                  </th>
                   <th class="w-14">序号</th>
                   <th>标题</th>
                   <th class="w-52">发布日期</th>
@@ -90,7 +126,10 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(article, index) in articles" :key="article.id">
+                <tr v-for="(article, index) in displayedArticles" :key="article.id">
+                  <td class="text-center" @click="toggleArticleCheck(article)">
+                    <UCheckbox class="justify-center" v-model="article.checked" color="blue" />
+                  </td>
                   <td class="text-center font-mono">{{ index + 1 }}</td>
                   <td class="px-4 font-mono">{{ maxLen(article.title) }}</td>
                   <td class="text-center font-mono">{{ article.update_time }}</td>
@@ -101,6 +140,10 @@
                 </tr>
               </tbody>
             </table>
+            <!-- 状态栏 -->
+            <div class="sticky bottom-0 h-[40px] bg-white flex items-center px-4 space-x-10 border-t-2 font-mono">
+              <span class="text-green-500">已选 {{ selectedArticles.length }} / {{ displayedArticles.length }}</span>
+            </div>
           </div>
         </main>
       </div>
@@ -111,7 +154,8 @@
   import { ref, reactive, computed, onMounted } from 'vue';
   import { login, getRecords } from '~/utils/pocketbase';
   import { Loader } from 'lucide-vue-next';
-  import { formatTimeStamp } from '~/utils';
+  import ExcelJS from 'exceljs';
+  import { saveAs } from 'file-saver';
   
   // PocketBase 配置
   const pocketBaseConfig = reactive({
@@ -122,7 +166,7 @@
   
   // 数据存储
   const accounts = ref([]);
-  const articles = ref([]);
+  const articles = reactive([]);
   const isLoading = ref(true);
   const isLoadingArticles = ref(false);
   
@@ -160,6 +204,28 @@
     }
   }
   
+  // 获取所有记录的方法（支持筛选）
+  async function getAllRecords(collectionName: string, filter: string = ''): Promise<any[]> {
+    const allRecords: any[] = [];
+    let page = 1;
+    const perPage = 100; // 每页记录数
+  
+    while (true) {
+      const records = await getRecords(collectionName, page, perPage, { filter });
+      allRecords.push(...records);
+  
+      // 如果当前页的记录数小于每页记录数，说明已到最后一页
+      if (records.length < perPage) {
+        break;
+      }
+  
+      page++;
+    }
+  
+    console.log(`从集合 ${collectionName} 中获取了 ${allRecords.length} 条记录，筛选条件: ${filter}`);
+    return allRecords;
+  }
+  
   // 获取公众号数据
   async function fetchAccounts() {
     try {
@@ -169,7 +235,7 @@
       const isLoggedIn = await loginPocketBase();
       if (!isLoggedIn) return;
   
-      const records = await getRecords('wechat_public_accounts');
+      const records = await getAllRecords('wechat_public_accounts'); // 不需要筛选条件
       accounts.value = records.map((record) => ({
         id: record.fakeid,
         nickname: record.nickname,
@@ -191,16 +257,21 @@
       const isLoggedIn = await loginPocketBase();
       if (!isLoggedIn) return;
   
-      const records = await getRecords('wechat_articles', 1, 100, {
-        filter: `fakeid="${accountId}"`,
-      });
-      articles.value = records.map((record) => ({
-        id: record.id,
-        title: record.title,
-        update_time: record.update_time,
-        author_name: record.author_name || '--',
-        is_original: record.is_original || false,
-      }));
+      // 使用筛选条件获取文章数据
+      const filter = `fakeid="${accountId}" and is_deleted=False`;
+      const records = await getAllRecords('wechat_articles', filter);
+      articles.length = 0;
+      articles.push(
+        ...records.map((record) => ({
+          id: record.id,
+          title: record.title,
+          update_time: record.update_time,
+          author_name: record.author_name || '--',
+          is_original: record.is_original || false,
+          checked: false,
+          display: true,
+        }))
+      );
     } catch (error) {
       console.error('获取文章数据失败：', error);
     } finally {
@@ -228,6 +299,117 @@
   // 工具函数
   function maxLen(text, max = 35) {
     return text.length > max ? text.slice(0, max) + '...' : text;
+  }
+  
+  // 筛选功能
+  const query = reactive({
+    title: '',
+    authors: [],
+    isOriginal: '所有',
+  });
+  
+  const articleAuthors = computed(() => {
+    return [...new Set(articles.map((article) => article.author_name).filter((author) => !!author))];
+  });
+  
+  const originalOptions = ['原创', '非原创', '所有'];
+  
+  function search() {
+    articles.forEach((article) => {
+      article.display = true;
+  
+      if (query.title && !article.title.includes(query.title)) {
+        article.display = false;
+      }
+      if (query.authors.length > 0 && !query.authors.includes(article.author_name)) {
+        article.display = false;
+      }
+      if (query.isOriginal === '原创' && !article.is_original) {
+        article.display = false;
+      }
+      if (query.isOriginal === '非原创' && article.is_original) {
+        article.display = false;
+      }
+    });
+  }
+  
+  // 导出 Excel
+  const excelBtnLoading = ref(false);
+  
+  function excelExport() {
+    excelBtnLoading.value = true;
+  
+    const data = articles.filter((article) => article.checked && article.display);
+    setTimeout(() => {
+      exportToExcel(data);
+      excelBtnLoading.value = false;
+    }, 0);
+  }
+  
+  async function exportToExcel(data) {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Sheet1');
+  
+    worksheet.columns = [
+      { header: '标题', key: 'title', width: 80 },
+      { header: '发布日期', key: 'update_time', width: 20 },
+      { header: '作者', key: 'author_name', width: 20 },
+      { header: '是否原创', key: 'is_original', width: 10 },
+    ];
+  
+    data.forEach((item) => {
+      worksheet.addRow({
+        title: item.title,
+        update_time: item.update_time,
+        author_name: item.author_name,
+        is_original: item.is_original ? '原创' : '非原创',
+      });
+    });
+  
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+    saveAs(blob, '导出数据.xlsx');
+  }
+  
+  // 全选功能
+  const checkAll = ref(false);
+  const isIndeterminate = ref(false);
+  
+  const displayedArticles = computed(() => {
+    return articles.filter((article) => article.display);
+  });
+  
+  const selectedArticles = computed(() => {
+    return articles.filter((article) => article.checked && article.display);
+  });
+  
+  function toggleArticleCheck(article) {
+    article.checked = !article.checked;
+  
+    if (articles.every((article) => article.checked)) {
+      checkAll.value = true;
+      isIndeterminate.value = false;
+    } else if (articles.every((article) => !article.checked)) {
+      checkAll.value = false;
+      isIndeterminate.value = false;
+    } else {
+      isIndeterminate.value = true;
+      checkAll.value = false;
+    }
+  }
+  
+  function onCheckAllChange() {
+    if (checkAll.value) {
+      articles.forEach((article) => {
+        article.checked = true;
+      });
+      isIndeterminate.value = false;
+    } else {
+      articles.forEach((article) => {
+        article.checked = false;
+      });
+      isIndeterminate.value = false;
+    }
   }
   
   // 初始化
