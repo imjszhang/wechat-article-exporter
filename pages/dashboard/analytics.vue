@@ -233,6 +233,27 @@ function convertTimestampToISO(timestamp: number): string {
   return new Date(timestamp * 1000).toISOString(); // 时间戳是秒，需要乘以 1000 转为毫秒
 }
 
+function normalizeUrl(url: string): string {
+  try {
+    const parsedUrl = new URL(url);
+
+    // 排序查询参数
+    const params = new URLSearchParams(parsedUrl.search);
+    const sortedParams = new URLSearchParams();
+    Array.from(params.keys())
+      .sort()
+      .forEach(key => {
+        sortedParams.append(key, params.get(key)!);
+      });
+
+    // 构造标准化 URL
+    return `${parsedUrl.origin}${parsedUrl.pathname.replace(/\/$/, '')}?${sortedParams.toString()}`;
+  } catch (error) {
+    console.error(`无法标准化 URL：${url}`, error);
+    return url; // 如果解析失败，返回原始 URL
+  }
+}
+
 async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
   try {
     const db = await openDatabase(dbInfo.name, dbInfo.version);
@@ -245,6 +266,7 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
     syncProgress.value.errors = [];
     syncProgress.value.isCancelled = false;
 
+    // 登录 PocketBase
     const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
     if (!loginSuccess) {
       alert('登录 PocketBase 失败，请检查配置。');
@@ -254,7 +276,9 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
 
     const collectionName = 'wechat_articles';
     const existingRecords = await getRecords(collectionName);
-    const existingLinks = new Set(existingRecords.map(record => record.link));
+
+    // 创建一个 Set 存储已存在的标准化 link，用于快速查找
+    const existingLinks = new Set(existingRecords.map(record => normalizeUrl(record.link)));
 
     // 分页同步
     const batchSize = 100; // 每次同步 100 条
@@ -273,8 +297,11 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
         }
 
         try {
+          // 标准化当前记录的 link
+          const normalizedLink = normalizeUrl(item.link);
+
           // 如果 link 已存在，跳过同步
-          if (existingLinks.has(item.link)) {
+          if (existingLinks.has(normalizedLink)) {
             syncProgress.value.current++;
             continue;
           }
@@ -282,7 +309,7 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
           // 映射字段并转换 update_time
           const mappedData = {
             title: item.title,
-            link: item.link,
+            link: item.link, // 保留原始 link
             cover: item.cover,
             update_time: convertTimestampToISO(item.update_time),
             digest: item.digest,
