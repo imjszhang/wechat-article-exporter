@@ -229,8 +229,50 @@ function cancelSync() {
   syncProgress.value.isCancelled = true;
 }
 
+function normalizeUrl(url: string): string {
+  try {
+    const parsedUrl = new URL(url);
+
+    // 排序查询参数
+    const params = new URLSearchParams(parsedUrl.search);
+    const sortedParams = new URLSearchParams();
+    Array.from(params.keys())
+      .sort()
+      .forEach(key => {
+        sortedParams.append(key, params.get(key)!);
+      });
+
+    // 构造标准化 URL
+    return `${parsedUrl.origin}${parsedUrl.pathname.replace(/\/$/, '')}?${sortedParams.toString()}`;
+  } catch (error) {
+    console.error(`无法标准化 URL：${url}`, error);
+    return url; // 如果解析失败，返回原始 URL
+  }
+}
+
 function convertTimestampToISO(timestamp: number): string {
   return new Date(timestamp * 1000).toISOString(); // 时间戳是秒，需要乘以 1000 转为毫秒
+}
+
+async function getAllRecords(collectionName: string): Promise<any[]> {
+  const allRecords: any[] = [];
+  let page = 1;
+  const perPage = 100; // 每页记录数
+
+  while (true) {
+    const records = await getRecords(collectionName, page, perPage);
+    allRecords.push(...records);
+
+    // 如果当前页的记录数小于每页记录数，说明已到最后一页
+    if (records.length < perPage) {
+      break;
+    }
+
+    page++;
+  }
+
+  console.log(`从集合 ${collectionName} 中获取了 ${allRecords.length} 条记录`);
+  return allRecords;
 }
 
 async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
@@ -254,10 +296,10 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
     }
 
     const collectionName = 'wechat_articles';
-    const existingRecords = await getRecords(collectionName);
+    const existingRecords = await getAllRecords(collectionName); // 获取所有记录
 
     // 创建一个 Set 存储已存在的标准化 link，用于快速查找
-    const existingLinks = new Set(existingRecords.map(record => record.link));
+    const existingLinks = new Set(existingRecords.map(record => normalizeUrl(record.link)));
 
     // 分页同步
     const batchSize = 100; // 每次同步 100 条
@@ -281,6 +323,7 @@ async function syncArticleObjectStore(dbInfo: { name: string; version: number })
 
           // 如果 link 已存在，跳过同步
           if (existingLinks.has(normalizedLink)) {
+            console.log(`跳过已存在的链接: ${normalizedLink}`);
             syncProgress.value.current++;
             continue;
           }

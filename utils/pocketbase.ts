@@ -32,9 +32,9 @@ export async function login(email: string, password: string): Promise<boolean> {
 }
 
 // 获取记录列表
-export async function getRecords(collectionName: string): Promise<any[]> {
+export async function getRecords(collectionName: string, page: number = 1, perPage: number = 30): Promise<any[]> {
   try {
-    const response = await fetch(`${BASE_URL}/api/collections/${collectionName}/records`, {
+    const response = await fetch(`${BASE_URL}/api/collections/${collectionName}/records?page=${page}&perPage=${perPage}`, {
       method: 'GET',
       headers: {
         'Authorization': authToken ? `Bearer ${authToken}` : '',
@@ -43,7 +43,7 @@ export async function getRecords(collectionName: string): Promise<any[]> {
 
     if (response.ok) {
       const data = await response.json();
-      console.log('获取记录成功！');
+      console.log(`获取记录成功！当前页: ${page}, 每页数量: ${perPage}`);
       return data.items || [];
     } else {
       const error = await response.text();
