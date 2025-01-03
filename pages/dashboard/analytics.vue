@@ -124,6 +124,13 @@
                   >
                     同步
                   </button>
+                  <button
+                    v-if="store === 'article'"
+                    @click="syncArticleObjectStore(db)"
+                    class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+                  >
+                    同步
+                  </button>
                 </div>
               </li>
             </ul>
@@ -176,6 +183,56 @@ function savePocketBaseConfig() {
   } catch (error) {
     console.error('保存 PocketBase 配置信息失败：', error);
     alert('保存失败，请检查控制台日志。');
+  }
+}
+
+
+async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
+  try {
+    // 打开数据库并导出 article 对象存储数据
+    const db = await openDatabase(dbInfo.name, dbInfo.version);
+    const exportData = await exportObjectStore(db, 'article'); // 假设对象存储名为 'article'
+
+    // 登录 PocketBase
+    const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
+    if (!loginSuccess) {
+      alert('登录 PocketBase 失败，请检查配置。');
+      return;
+    }
+
+    // 获取 PocketBase 中 wechat_articles 集合的现有记录
+    const collectionName = 'wechat_articles';
+    const existingRecords = await getRecords(collectionName);
+
+    // 同步数据
+    for (const item of exportData) {
+      // 映射字段
+      const mappedData = {
+        title: item.title,
+        link: item.link,
+        cover: item.cover,
+        update_time: item.update_time,
+        digest: item.digest,
+        author_name: item.author_name,
+        is_deleted: item.is_deleted,
+        fakeid: item.fakeid,
+      };
+
+      // 检查是否已存在（通过 link 字段唯一识别）
+      const existingRecord = existingRecords.find(record => record.link === item.link);
+      if (existingRecord) {
+        // 更新记录
+        await updateRecord(collectionName, existingRecord.id, mappedData);
+      } else {
+        // 创建新记录
+        await createRecord(collectionName, mappedData);
+      }
+    }
+
+    alert('article 对象存储同步成功！');
+  } catch (error) {
+    console.error('同步 article 对象存储失败：', error);
+    alert('同步 article 对象存储失败，请检查控制台日志。');
   }
 }
 
