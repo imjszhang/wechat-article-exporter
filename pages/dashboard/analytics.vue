@@ -402,7 +402,7 @@ async function syncInfoObjectStore(dbInfo: { name: string; version: number }) {
 
     // 获取 PocketBase 中 wechat_public_accounts 集合的现有记录
     const collectionName = 'wechat_public_accounts';
-    const existingRecords = await getRecords(collectionName);
+    const existingRecords = await getAllRecords(collectionName);
 
     // 同步数据
     for (const item of exportData) {
