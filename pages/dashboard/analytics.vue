@@ -145,21 +145,35 @@
   <div v-if="syncProgress.isSyncing" class="fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
   <div class="text-center">
     <p class="text-slate-600 mb-4">正在同步数据，请稍候...</p>
-    <div class="w-64 bg-gray-200 rounded-full h-4">
+    
+    <!-- 公众号进度条 -->
+    <div class="w-64 bg-gray-200 rounded-full h-4 mb-2">
       <div
         class="bg-blue-500 h-4 rounded-full"
-        :style="{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }"
+        :style="{ width: `${(syncProgress.currentAccount / syncProgress.totalAccounts) * 100}%` }"
       ></div>
     </div>
-    <p class="text-slate-600 mt-2">
-      已同步 {{ syncProgress.current }} / {{ syncProgress.total }} 条
+    <p class="text-slate-600">
+      公众号进度：{{ syncProgress.currentAccount }} / {{ syncProgress.totalAccounts }}
     </p>
-    <p class="text-slate-600 mt-2">
-      当前公众号：{{ syncProgress.currentAccount }}
+    <p class="text-slate-600">
+      当前公众号：{{ syncProgress.currentAccountName }}
     </p>
-    <p class="text-slate-600 mt-2">
-      当前文章：{{ syncProgress.currentArticle }}
+
+    <!-- 文章进度条 -->
+    <div class="w-64 bg-gray-200 rounded-full h-4 mt-4">
+      <div
+        class="bg-green-500 h-4 rounded-full"
+        :style="{ width: `${(syncProgress.currentArticle / syncProgress.totalArticles) * 100}%` }"
+      ></div>
+    </div>
+    <p class="text-slate-600">
+      文章进度：{{ syncProgress.currentArticle }} / {{ syncProgress.totalArticles }}
     </p>
+    <p class="text-slate-600">
+      当前文章：{{ syncProgress.currentArticleTitle }}
+    </p>
+
     <button
       @click="cancelSync"
       class="mt-4 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
@@ -216,15 +230,15 @@ function savePocketBaseConfig() {
 
 
 const syncProgress = ref({
-  current: 0, // 当前已同步的条数
-  total: 0,   // 总条数
-  isSyncing: false, // 是否正在同步
+  currentAccount: 0, // 当前已同步的公众号数量
+  totalAccounts: 0,  // 总的公众号数量
+  currentArticle: 0, // 当前已同步的文章数量
+  totalArticles: 0,  // 总的文章数量
+  isSyncing: false,  // 是否正在同步
   errors: [] as string[], // 记录同步失败的错误信息
   isCancelled: false, // 是否取消同步
-  currentAccount: '', // 当前正在同步的公众号名称
-  currentArticle: '', // 当前正在同步的文章标题
-  totalAccounts: 0, // 总的公众号数量
-  totalArticles: 0, // 总的文章数量
+  currentAccountName: '', // 当前正在同步的公众号名称
+  currentArticleTitle: '', // 当前正在同步的文章标题
 });
 
 function cancelSync() {
@@ -266,8 +280,9 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
     // 导出本地 INFO 对象存储数据
     const infoData = await exportObjectStore(db, 'info');
     syncProgress.value.totalAccounts = infoData.length; // 总公众号数量
+    syncProgress.value.currentAccount = 0; // 初始化已同步的公众号数量
     syncProgress.value.totalArticles = 0; // 初始化总文章数量
-    syncProgress.value.current = 0;
+    syncProgress.value.currentArticle = 0; // 初始化已同步的文章数量
     syncProgress.value.isSyncing = true;
     syncProgress.value.errors = [];
     syncProgress.value.isCancelled = false;
@@ -302,7 +317,7 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
 
       try {
         // 更新当前正在同步的公众号
-        syncProgress.value.currentAccount = account.nickname;
+        syncProgress.value.currentAccountName = account.nickname;
 
         // 映射公众号数据
         const mappedAccountData = {
@@ -348,7 +363,7 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
 
           try {
             // 更新当前正在同步的文章
-            syncProgress.value.currentArticle = article.title;
+            syncProgress.value.currentArticleTitle = article.title;
 
             // 映射文章数据
             const mappedArticleData = {
@@ -366,6 +381,9 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
             // 创建文章记录
             await createRecord(articleCollection, mappedArticleData);
 
+            // 更新文章进度
+            syncProgress.value.currentArticle++;
+
             // 更新公众号的 last_update_time
             const articleUpdateTime = new Date(article.update_time * 1000).toISOString();
             if (!lastUpdateTime || articleUpdateTime > lastUpdateTime) {
@@ -381,8 +399,8 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
           }
         }
 
-        // 更新进度
-        syncProgress.value.current++;
+        // 更新公众号进度
+        syncProgress.value.currentAccount++;
       } catch (error) {
         syncProgress.value.errors.push(
           `同步公众号失败：${account.nickname}，错误：${error.message}`
@@ -399,7 +417,6 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
     syncProgress.value.isSyncing = false;
   }
 }
-
 
 async function calculateStorageInfo() {
   if ('storage' in navigator && 'estimate' in navigator.storage) {
