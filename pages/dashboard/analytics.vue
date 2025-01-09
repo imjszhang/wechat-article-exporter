@@ -142,7 +142,7 @@
     </div>
   </div>
 
-<div v-if="syncProgress.isSyncing" class="fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
+  <div v-if="syncProgress.isSyncing" class="fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
   <div class="text-center">
     <p class="text-slate-600 mb-4">正在同步数据，请稍候...</p>
     <div class="w-64 bg-gray-200 rounded-full h-4">
@@ -153,6 +153,12 @@
     </div>
     <p class="text-slate-600 mt-2">
       已同步 {{ syncProgress.current }} / {{ syncProgress.total }} 条
+    </p>
+    <p class="text-slate-600 mt-2">
+      当前公众号：{{ syncProgress.currentAccount }}
+    </p>
+    <p class="text-slate-600 mt-2">
+      当前文章：{{ syncProgress.currentArticle }}
     </p>
     <button
       @click="cancelSync"
@@ -215,32 +221,16 @@ const syncProgress = ref({
   isSyncing: false, // 是否正在同步
   errors: [] as string[], // 记录同步失败的错误信息
   isCancelled: false, // 是否取消同步
+  currentAccount: '', // 当前正在同步的公众号名称
+  currentArticle: '', // 当前正在同步的文章标题
+  totalAccounts: 0, // 总的公众号数量
+  totalArticles: 0, // 总的文章数量
 });
 
 function cancelSync() {
   syncProgress.value.isCancelled = true;
 }
 
-function normalizeUrl(url: string): string {
-  try {
-    const parsedUrl = new URL(url);
-
-    // 排序查询参数
-    const params = new URLSearchParams(parsedUrl.search);
-    const sortedParams = new URLSearchParams();
-    Array.from(params.keys())
-      .sort()
-      .forEach(key => {
-        sortedParams.append(key, params.get(key)!);
-      });
-
-    // 构造标准化 URL
-    return `${parsedUrl.origin}${parsedUrl.pathname.replace(/\/$/, '')}?${sortedParams.toString()}`;
-  } catch (error) {
-    console.error(`无法标准化 URL：${url}`, error);
-    return url; // 如果解析失败，返回原始 URL
-  }
-}
 
 function convertTimestampToISO(timestamp: number): string {
   return new Date(timestamp * 1000).toISOString(); // 时间戳是秒，需要乘以 1000 转为毫秒
@@ -271,14 +261,12 @@ async function getAllRecords(collectionName: string, filter: string = ''): Promi
 
 async function syncDatabase(dbInfo: { name: string; version: number }) {
   try {
-    // 打开本地数据库
     const db = await openDatabase(dbInfo.name, dbInfo.version);
 
     // 导出本地 INFO 对象存储数据
     const infoData = await exportObjectStore(db, 'info');
-
-    // 初始化同步状态
-    syncProgress.value.total = infoData.length; // 总公众号数量
+    syncProgress.value.totalAccounts = infoData.length; // 总公众号数量
+    syncProgress.value.totalArticles = 0; // 初始化总文章数量
     syncProgress.value.current = 0;
     syncProgress.value.isSyncing = true;
     syncProgress.value.errors = [];
@@ -313,6 +301,9 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
       }
 
       try {
+        // 更新当前正在同步的公众号
+        syncProgress.value.currentAccount = account.nickname;
+
         // 映射公众号数据
         const mappedAccountData = {
           fakeid: account.fakeid,
@@ -322,22 +313,19 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
         };
 
         // 检查公众号是否已存在
-        let accountId: string; // 用于存储公众号的 ID
-        let lastUpdateTime: string | null = null; // 显式声明类型
+        let accountId: string;
+        let lastUpdateTime: string | null = null;
         const existingAccount = accountMap.get(account.fakeid);
         if (existingAccount) {
           // 更新公众号信息
           await updateRecord(accountCollection, existingAccount.id, mappedAccountData);
-          accountId = existingAccount.id; // 获取现有公众号的 ID
-          lastUpdateTime = existingAccount.last_update_time; // 获取现有公众号的 last_update_time
+          accountId = existingAccount.id;
+          lastUpdateTime = existingAccount.last_update_time;
         } else {
           // 创建新公众号记录
           const newAccount = await createRecord(accountCollection, mappedAccountData);
-          accountId = newAccount.id; // 获取新创建公众号的 ID
+          accountId = newAccount.id;
         }
-
-        // 显示当前正在同步的公众号
-        console.log(`正在同步公众号：${account.nickname}`);
 
         // 筛选需要同步的文章
         const articleData = await exportObjectStore(db, 'article');
@@ -348,6 +336,9 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
           );
         });
 
+        // 更新总文章数量
+        syncProgress.value.totalArticles += articlesToSync.length;
+
         // 同步文章
         for (const article of articlesToSync) {
           if (syncProgress.value.isCancelled) {
@@ -356,6 +347,9 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
           }
 
           try {
+            // 更新当前正在同步的文章
+            syncProgress.value.currentArticle = article.title;
+
             // 映射文章数据
             const mappedArticleData = {
               title: article.title,
@@ -366,7 +360,7 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
               author_name: article.author_name,
               is_deleted: article.is_deleted,
               fakeid: article.fakeid,
-              account: accountId, // 关联文章到公众号
+              account: accountId,
             };
 
             // 创建文章记录
@@ -380,7 +374,6 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
               await updateRecord(accountCollection, accountId, updatedAccountData);
             }
           } catch (error) {
-            // 记录文章同步错误
             syncProgress.value.errors.push(
               `同步文章失败：${article.title}，错误：${error.message}`
             );
@@ -391,7 +384,6 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
         // 更新进度
         syncProgress.value.current++;
       } catch (error) {
-        // 记录公众号同步错误
         syncProgress.value.errors.push(
           `同步公众号失败：${account.nickname}，错误：${error.message}`
         );
@@ -399,171 +391,12 @@ async function syncDatabase(dbInfo: { name: string; version: number }) {
       }
     }
 
-    // 显示同步结果
-    const successCount = syncProgress.value.current;
-    const errorCount = syncProgress.value.errors.length;
-    alert(`同步完成！成功：${successCount} 个公众号，失败：${errorCount} 条记录`);
+    alert('同步完成！');
   } catch (error) {
     console.error('同步数据库失败：', error);
     alert('同步数据库失败，请检查控制台日志。');
   } finally {
     syncProgress.value.isSyncing = false;
-  }
-}
-
-async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
-  try {
-    // 1. 打开本地数据库并导出 info 对象存储数据
-    const db = await openDatabase(dbInfo.name, dbInfo.version);
-    const infoData = await exportObjectStore(db, 'info');
-
-    // 提取所有的 fakeid
-    const fakeidSet = new Set(infoData.map((item: any) => item.fakeid));
-    if (fakeidSet.size === 0) {
-      alert('未找到任何 fakeid，无法进行同步。');
-      return;
-    }
-
-    // 2. 初始化同步状态
-    syncProgress.value.total = 0; // 总条数稍后更新
-    syncProgress.value.current = 0;
-    syncProgress.value.isSyncing = true;
-    syncProgress.value.errors = [];
-    syncProgress.value.isCancelled = false;
-
-    // 3. 登录 PocketBase
-    const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
-    if (!loginSuccess) {
-      alert('登录 PocketBase 失败，请检查配置。');
-      syncProgress.value.isSyncing = false;
-      return;
-    }
-
-    // 4. 获取 PocketBase 中的现有记录，使用 fakeid 作为筛选条件
-    const collectionName = 'wechat_articles';
-    const filter = Array.from(fakeidSet).map(id => `fakeid='${id}'`).join(" || ");
-    const existingRecords = await getAllRecords(collectionName, filter);
-
-    // 创建一个 Set 存储已存在的标准化 link，用于快速查找
-    const existingLinks = new Set(existingRecords.map(record => normalizeUrl(record.link)));
-
-    // 5. 导出本地数据库中的 article 对象存储数据
-    const exportData = await exportObjectStore(db, 'article');
-    syncProgress.value.total = exportData.length; // 更新总条数
-
-    // 6. 分页同步
-    const batchSize = 100; // 每次同步 100 条
-    for (let i = 0; i < exportData.length; i += batchSize) {
-      if (syncProgress.value.isCancelled) {
-        console.log('同步已取消');
-        break;
-      }
-
-      const batch = exportData.slice(i, i + batchSize);
-
-      for (const item of batch) {
-        if (syncProgress.value.isCancelled) {
-          console.log('同步已取消');
-          break;
-        }
-
-        try {
-          // 标准化当前记录的 link
-          const normalizedLink = normalizeUrl(item.link);
-
-          // 如果 link 已存在，跳过同步
-          if (existingLinks.has(normalizedLink)) {
-            console.log(`跳过已存在的链接: ${normalizedLink}`);
-            syncProgress.value.current++;
-            continue;
-          }
-
-          // 检查当前记录的 fakeid 是否在 fakeidSet 中
-          if (!fakeidSet.has(item.fakeid)) {
-            console.log(`跳过不属于指定 fakeid 的记录: ${item.link}`);
-            syncProgress.value.current++;
-            continue;
-          }
-
-          // 映射字段并转换 update_time
-          const mappedData = {
-            title: item.title,
-            link: item.link,
-            cover: item.cover,
-            update_time: convertTimestampToISO(item.update_time),
-            digest: item.digest,
-            author_name: item.author_name,
-            is_deleted: item.is_deleted,
-            fakeid: item.fakeid,
-          };
-
-          // 创建新记录
-          await createRecord(collectionName, mappedData);
-
-          // 更新进度
-          syncProgress.value.current++;
-        } catch (error) {
-          // 记录错误信息
-          syncProgress.value.errors.push(`同步失败：${item.link}，错误：${error.message}`);
-          console.error(`同步失败：${item.link}`, error);
-        }
-      }
-    }
-
-    // 显示同步结果
-    const successCount = syncProgress.value.current;
-    const errorCount = syncProgress.value.errors.length;
-    alert(`同步完成！成功：${successCount} 条，失败：${errorCount} 条`);
-  } catch (error) {
-    console.error('同步 article 对象存储失败：', error);
-    alert('同步 article 对象存储失败，请检查控制台日志。');
-  } finally {
-    syncProgress.value.isSyncing = false;
-  }
-}
-
-async function syncInfoObjectStore(dbInfo: { name: string; version: number }) {
-  try {
-    // 打开数据库并导出 info 对象存储数据
-    const db = await openDatabase(dbInfo.name, dbInfo.version);
-    const exportData = await exportObjectStore(db, 'info');
-
-    // 登录 PocketBase
-    const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
-    if (!loginSuccess) {
-      alert('登录 PocketBase 失败，请检查配置。');
-      return;
-    }
-
-    // 获取 PocketBase 中 wechat_public_accounts 集合的现有记录
-    const collectionName = 'wechat_public_accounts';
-    const existingRecords = await getAllRecords(collectionName);
-
-    // 同步数据
-    for (const item of exportData) {
-      // 映射字段
-      const mappedData = {
-        fakeid: item.fakeid,
-        nickname: item.nickname,
-        round_head_img: item.round_head_img,
-        articles: item.articles,
-      };
-
-      // 检查是否已存在
-      const existingRecord = existingRecords.find(record => record.fakeid === item.fakeid);
-      if (existingRecord) {
-        // 更新记录
-        await updateRecord(collectionName, existingRecord.id, mappedData);
-      } else {
-        // 创建新记录
-        await createRecord(collectionName, mappedData);
-      }
-    }
-
-    alert('info 对象存储同步成功！');
-  } catch (error) {
-    console.error('同步 info 对象存储失败：', error);
-    alert('同步 info 对象存储失败，请检查控制台日志。');
   }
 }
 
