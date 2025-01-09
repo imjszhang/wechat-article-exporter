@@ -100,6 +100,12 @@
             >
               导出
             </button>
+            <button
+              @click="syncDatabase(db)"
+              class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              同步
+            </button>
           </div>
           <div>
             <h4 class="text-sm font-semibold text-slate-700">对象存储列表</h4>
@@ -116,20 +122,6 @@
                     class="px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-sm"
                   >
                     导出
-                  </button>
-                  <button
-                    v-if="store === 'info'"
-                    @click="syncInfoObjectStore(db)"
-                    class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-                  >
-                    同步
-                  </button>
-                  <button
-                    v-if="store === 'article'"
-                    @click="syncArticleObjectStore(db)"
-                    class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-                  >
-                    同步
                   </button>
                 </div>
               </li>
@@ -274,6 +266,149 @@ async function getAllRecords(collectionName: string, filter: string = ''): Promi
 
   console.log(`从集合 ${collectionName} 中获取了 ${allRecords.length} 条记录，筛选条件: ${filter}`);
   return allRecords;
+}
+
+
+async function syncDatabase(dbInfo: { name: string; version: number }) {
+  try {
+    // 打开本地数据库
+    const db = await openDatabase(dbInfo.name, dbInfo.version);
+
+    // 导出本地 INFO 对象存储数据
+    const infoData = await exportObjectStore(db, 'info');
+
+    // 初始化同步状态
+    syncProgress.value.total = infoData.length; // 总公众号数量
+    syncProgress.value.current = 0;
+    syncProgress.value.isSyncing = true;
+    syncProgress.value.errors = [];
+    syncProgress.value.isCancelled = false;
+
+    // 登录 PocketBase
+    const loginSuccess = await login(pocketBaseConfig.value.email, pocketBaseConfig.value.password);
+    if (!loginSuccess) {
+      alert('登录 PocketBase 失败，请检查配置。');
+      syncProgress.value.isSyncing = false;
+      return;
+    }
+
+    // 获取 PocketBase 中 wechat_public_accounts 集合的现有记录
+    const accountCollection = 'wechat_public_accounts';
+    const articleCollection = 'wechat_articles';
+    const existingAccounts = await getAllRecords(accountCollection);
+
+    // 创建一个 Map，用于快速查找现有公众号的 last_update_time
+    const accountMap = new Map<string, { id: string; last_update_time: string | null }>(
+      existingAccounts.map(account => [
+        account.fakeid,
+        { id: account.id, last_update_time: account.last_update_time || null },
+      ])
+    );
+
+    // 遍历本地 INFO 数据，逐个同步公众号信息和文章
+    for (const account of infoData) {
+      if (syncProgress.value.isCancelled) {
+        console.log('同步已取消');
+        break;
+      }
+
+      try {
+        // 映射公众号数据
+        const mappedAccountData = {
+          fakeid: account.fakeid,
+          nickname: account.nickname,
+          round_head_img: account.round_head_img,
+          articles: account.articles,
+        };
+
+        // 检查公众号是否已存在
+        let accountId: string; // 用于存储公众号的 ID
+        let lastUpdateTime: string | null = null; // 显式声明类型
+        const existingAccount = accountMap.get(account.fakeid);
+        if (existingAccount) {
+          // 更新公众号信息
+          await updateRecord(accountCollection, existingAccount.id, mappedAccountData);
+          accountId = existingAccount.id; // 获取现有公众号的 ID
+          lastUpdateTime = existingAccount.last_update_time; // 获取现有公众号的 last_update_time
+        } else {
+          // 创建新公众号记录
+          const newAccount = await createRecord(accountCollection, mappedAccountData);
+          accountId = newAccount.id; // 获取新创建公众号的 ID
+        }
+
+        // 显示当前正在同步的公众号
+        console.log(`正在同步公众号：${account.nickname}`);
+
+        // 筛选需要同步的文章
+        const articleData = await exportObjectStore(db, 'article');
+        const articlesToSync = articleData.filter(article => {
+          return (
+            article.fakeid === account.fakeid &&
+            (!lastUpdateTime || article.update_time > new Date(lastUpdateTime).getTime() / 1000)
+          );
+        });
+
+        // 同步文章
+        for (const article of articlesToSync) {
+          if (syncProgress.value.isCancelled) {
+            console.log('同步已取消');
+            break;
+          }
+
+          try {
+            // 映射文章数据
+            const mappedArticleData = {
+              title: article.title,
+              link: article.link,
+              cover: article.cover,
+              update_time: convertTimestampToISO(article.update_time),
+              digest: article.digest,
+              author_name: article.author_name,
+              is_deleted: article.is_deleted,
+              fakeid: article.fakeid,
+              account: accountId, // 关联文章到公众号
+            };
+
+            // 创建文章记录
+            await createRecord(articleCollection, mappedArticleData);
+
+            // 更新公众号的 last_update_time
+            const articleUpdateTime = new Date(article.update_time * 1000).toISOString();
+            if (!lastUpdateTime || articleUpdateTime > lastUpdateTime) {
+              lastUpdateTime = articleUpdateTime;
+              const updatedAccountData = { ...mappedAccountData, last_update_time: lastUpdateTime };
+              await updateRecord(accountCollection, accountId, updatedAccountData);
+            }
+          } catch (error) {
+            // 记录文章同步错误
+            syncProgress.value.errors.push(
+              `同步文章失败：${article.title}，错误：${error.message}`
+            );
+            console.error(`同步文章失败：${article.title}`, error);
+          }
+        }
+
+        // 更新进度
+        syncProgress.value.current++;
+      } catch (error) {
+        // 记录公众号同步错误
+        syncProgress.value.errors.push(
+          `同步公众号失败：${account.nickname}，错误：${error.message}`
+        );
+        console.error(`同步公众号失败：${account.nickname}`, error);
+      }
+    }
+
+    // 显示同步结果
+    const successCount = syncProgress.value.current;
+    const errorCount = syncProgress.value.errors.length;
+    alert(`同步完成！成功：${successCount} 个公众号，失败：${errorCount} 条记录`);
+  } catch (error) {
+    console.error('同步数据库失败：', error);
+    alert('同步数据库失败，请检查控制台日志。');
+  } finally {
+    syncProgress.value.isSyncing = false;
+  }
 }
 
 async function syncArticleObjectStore(dbInfo: { name: string; version: number }) {
